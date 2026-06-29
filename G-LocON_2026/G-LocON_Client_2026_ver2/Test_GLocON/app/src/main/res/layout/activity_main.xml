@@ -1,0 +1,215 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    [変更] レイアウト全面リデザイン
+    ・マップを画面全面に表示（旧: 固定サイズの378×443dp）
+    ・全UIをマップの上にフローティング配置（現代の地図アプリ準拠）
+    ・人間工学に基づくボタン配置:
+        - 入力カード: 画面上部（片手操作時に親指が届く範囲ではないが視認しやすい）
+        - ズーム操作: 右下（利き手の親指で操作しやすい位置）
+        - コンパス:   右上（誤操作しにくい位置）
+        - 終了ボタン: 左下（誤タップを防ぐため右下ズームから離した位置）
+-->
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <!-- ========================================================
+         地図 (全面表示・最背面)
+         ======================================================== -->
+    <org.osmdroid.views.MapView
+        android:id="@+id/mapFragment"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- ========================================================
+         上部：Peer ID 入力カード
+         ステータスバーを避けるため marginTop=36dp
+         STARTボタン押下後に visibility=GONE で非表示にする
+         ======================================================== -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/inputCard"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="36dp"
+        android:layout_marginEnd="16dp"
+        app:cardBackgroundColor="@color/panel_bg"
+        app:cardCornerRadius="16dp"
+        app:cardElevation="8dp"
+        app:strokeColor="@color/panel_stroke"
+        app:strokeWidth="1dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingStart="16dp"
+            android:paddingEnd="8dp">
+
+            <!-- 検索アイコン代わりの位置アイコン -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="📍"
+                android:textSize="18sp"
+                android:paddingEnd="8dp" />
+
+            <EditText
+                android:id="@+id/peerId"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:hint="Peer ID を入力"
+                android:inputType="textPersonName"
+                android:background="@null"
+                android:textSize="15sp"
+                android:textColor="#3C4043"
+                android:textColorHint="#9AA0A6"
+                android:singleLine="true" />
+
+            <!-- START ボタン（カード内・右端） -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/start"
+                style="@style/Widget.Material3.Button"
+                android:layout_width="wrap_content"
+                android:layout_height="40dp"
+                android:text="開始"
+                android:textSize="14sp"
+                android:letterSpacing="0.05"
+                app:cornerRadius="20dp"
+                app:backgroundTint="@color/map_primary" />
+
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- ========================================================
+         右上：コンパス / カメラ方向切替ボタン
+         HEAD UP ↔ NORTH UP を切り替える
+         地図アプリではコンパスは右上が定番位置
+         ======================================================== -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/compassCard"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_marginTop="36dp"
+        android:layout_marginEnd="16dp"
+        app:cardBackgroundColor="@color/panel_bg"
+        app:cardCornerRadius="24dp"
+        app:cardElevation="6dp"
+        app:strokeColor="@color/panel_stroke"
+        app:strokeWidth="1dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/angle"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:text="H↑"
+            android:textSize="11sp"
+            android:textColor="@color/btn_icon_tint"
+            android:fontFamily="monospace"
+            android:padding="0dp"
+            app:cornerRadius="24dp"
+            app:backgroundTint="@android:color/transparent"
+            app:rippleColor="#20000000" />
+
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- ========================================================
+         右下：ズームコントロール（+ / −）
+         Google Maps・Apple Maps と同じ右下配置
+         2つのボタンをカードでまとめてグループとして認識させる
+         ======================================================== -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/zoomCard"
+        android:layout_width="48dp"
+        android:layout_height="104dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="112dp"
+        app:cardBackgroundColor="@color/panel_bg"
+        app:cardCornerRadius="24dp"
+        app:cardElevation="6dp"
+        app:strokeColor="@color/panel_stroke"
+        app:strokeWidth="1dp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical">
+
+            <!-- ズームイン (+) -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/plus"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:text="+"
+                android:textSize="22sp"
+                android:textColor="@color/btn_icon_tint"
+                android:padding="0dp"
+                app:cornerRadius="0dp"
+                app:backgroundTint="@android:color/transparent"
+                app:rippleColor="#20000000" />
+
+            <!-- 区切り線 -->
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/divider" />
+
+            <!-- ズームアウト (−) -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/minus"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:text="−"
+                android:textSize="22sp"
+                android:textColor="@color/btn_icon_tint"
+                android:padding="0dp"
+                app:cornerRadius="0dp"
+                app:backgroundTint="@android:color/transparent"
+                app:rippleColor="#20000000" />
+
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- ========================================================
+         左下：終了ボタン
+         誤タップ防止のため右下ズームボタンから離した左下に配置
+         START前は非表示、START後に表示する
+         ======================================================== -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/end"
+        style="@style/Widget.Material3.Button.OutlinedButton"
+        android:layout_width="wrap_content"
+        android:layout_height="48dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginBottom="32dp"
+        android:text="終了"
+        android:textSize="14sp"
+        android:textColor="@color/btn_end_text"
+        android:visibility="gone"
+        app:cornerRadius="24dp"
+        app:strokeColor="@color/btn_end_bg"
+        app:strokeWidth="2dp"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>

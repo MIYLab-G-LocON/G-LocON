@@ -1,0 +1,9 @@
+<component name="libraryTable">
+  <library name="java-json1">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/VirtualClient/lib/java-json.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+
+    <!-- マップUI用カラーパレット -->
+    <!-- 地図アプリらしい落ち着いたブルーグレー系 -->
+    <color name="map_primary">#1A73E8</color>          <!-- Google Mapsライクなブルー -->
+    <color name="map_primary_dark">#1557B0</color>
+    <color name="map_on_primary">#FFFFFF</color>
+
+    <!-- フローティングUIパネルの背景 -->
+    <color name="panel_bg">#F2FFFFFF</color>            <!-- 半透明白 (alpha=F2≒95%) -->
+    <color name="panel_bg_dark">#E6FFFFFF</color>       <!-- やや濃い半透明白 -->
+    <color name="panel_stroke">#20000000</color>        <!-- 薄い枠線 -->
+
+    <!-- ボタンの色 -->
+    <color name="btn_icon_tint">#3C4043</color>        <!-- アイコン/テキスト: ダークグレー -->
+    <color name="btn_start_bg">#1A73E8</color>
+    <color name="btn_end_bg">#EA4335</color>            <!-- 終了ボタン: 警告赤 -->
+    <color name="btn_end_text">#EA4335</color>
+
+    <!-- ズームコントロールの区切り線 -->
+    <color name="divider">#20000000</color>
+</resources>
