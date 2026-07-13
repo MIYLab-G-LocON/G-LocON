@@ -5,6 +5,8 @@
       <module fileurl="file://$PROJECT_DIR$/STUNServer/STUNServer.iml" filepath="$PROJECT_DIR$/STUNServer/STUNServer.iml" />
       <module fileurl="file://$PROJECT_DIR$/SignalingServer/SignalingServer.iml" filepath="$PROJECT_DIR$/SignalingServer/SignalingServer.iml" />
       <module fileurl="file://$PROJECT_DIR$/VirtualClient/VirtualClient.iml" filepath="$PROJECT_DIR$/VirtualClient/VirtualClient.iml" />
+      <module fileurl="file://$PROJECT_DIR$/EdgeServer/EdgeServer.iml" filepath="$PROJECT_DIR$/EdgeServer/EdgeServer.iml" />
+      <module fileurl="file://$PROJECT_DIR$/MasterServer/MasterServer.iml" filepath="$PROJECT_DIR$/MasterServer/MasterServer.iml" />
     </modules>
   </component>
 </project>

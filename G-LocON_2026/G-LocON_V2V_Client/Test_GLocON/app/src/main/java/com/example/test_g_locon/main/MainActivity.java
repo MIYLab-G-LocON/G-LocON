@@ -21,11 +21,16 @@ import com.example.test_g_locon.navigation.Intersection;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.card.MaterialCardView;
 
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.Path;
+
 import org.osmdroid.config.Configuration;
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory;
 import org.osmdroid.util.GeoPoint;
 import org.osmdroid.views.MapView;
-import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay;
 
 import java.io.File;
 import java.net.DatagramSocket;
@@ -86,7 +91,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private final double searchRange = 200;
 
     // TODO: サーバのIPアドレスを設定してください
-    private static final String SERVER_IP = "172.31.115.240"; //研究室
+    private static final String SERVER_IP = "172.31.104.194"; //研究室
 //    private static final String SERVER_IP = "192.168.0.207"; // 自宅
     // TODO: 仮想位置を使用する場合は true に変更してください
     private static final boolean USE_VIRTUAL_POSITION = false;
@@ -143,6 +148,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
         angle.setText("N↑");
 
+        // 実験用デフォルト目的地（実運用時は削除）
+        destLatInput.setText("35.949066");
+        destLngInput.setText("139.640614");
+
         // 目的地入力カードは開始前は非表示
         routeCard.setVisibility(View.GONE);
     }
@@ -157,16 +166,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         mapView.getController().setZoom((double) cameraLevel);
         mapView.getController().setCenter(new GeoPoint(INITIAL_LATITUDE, INITIAL_LONGITUDE));
 
-        // 自端末位置の青点オーバーレイ
-        if (ActivityCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION)
-                == PackageManager.PERMISSION_GRANTED) {
-            MyLocationNewOverlay myLocationOverlay = new MyLocationNewOverlay(mapView);
-            myLocationOverlay.enableMyLocation();
-            mapView.getOverlays().add(myLocationOverlay);
-        }
-
         // MapManager 初期化（地図操作を全委譲）
         mapManager = new MapManager(this, mapView);
+        mapManager.initMyLocationMarker(createNavArrowBitmap());
         mapManager.setOnMarkerTapListener(tappedPeerId -> {
             if (appController.getP2p() != null) {
                 for (UserInfo user : appController.getP2p().getPeripheralUsers()) {
@@ -323,6 +325,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 location.getLatitude(), location.getLongitude(),
                 cameraLevel, nowCameraAngle, searchRange
         );
+        mapManager.updateMyLocation(location.getLatitude(), location.getLongitude(), (float) bearing);
     }
 
     @Override
@@ -344,7 +347,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     @Override
     public void onIntersectionJoined(Intersection intersection) {
         mapManager.updateIntersectionMarkerJoined(intersection);
-        showToast("JOIN: " + intersection.getIntersectionId());
+        // Toast はLogcatで確認するため表示しない（スパム防止）
     }
 
     @Override
@@ -358,5 +361,54 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
     private void showToast(final String msg) {
         runOnUiThread(() -> Toast.makeText(this, msg, Toast.LENGTH_SHORT).show());
+    }
+
+    /**
+     * ナビアプリ風の矢印アイコンを生成する。
+     * MyLocationNewOverlay はビットマップ中心をGPS座標に合わせるため，
+     * 矢印の重心がビットマップ中心に来るよう設計する。
+     */
+    private Bitmap createNavArrowBitmap() {
+        final int SIZE = 64;
+        final float cx = SIZE / 2f;
+        final float cy = SIZE / 2f;
+        Bitmap bmp = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bmp);
+
+        // 矢印の頂点（ビットマップ中心基準）
+        // 先端：上   左右裾：下   後部くびれ：中央より少し下
+        float tipY   = cy - 22f;  // 先端（上）
+        float baseY  = cy + 20f;  // 裾（下）
+        float neckY  = cy + 6f;   // 後部くびれ
+        float halfW  = 18f;       // 裾の半幅
+        float neckW  = 7f;        // くびれの半幅
+
+        // 白縁取り
+        Paint border = new Paint(Paint.ANTI_ALIAS_FLAG);
+        border.setColor(Color.WHITE);
+        border.setStyle(Paint.Style.FILL);
+        Path bp = new Path();
+        bp.moveTo(cx, tipY - 3f);
+        bp.lineTo(cx + halfW + 3f, baseY + 3f);
+        bp.lineTo(cx + neckW + 2f, neckY + 2f);
+        bp.lineTo(cx - neckW - 2f, neckY + 2f);
+        bp.lineTo(cx - halfW - 3f, baseY + 3f);
+        bp.close();
+        canvas.drawPath(bp, border);
+
+        // 矢印本体（青）
+        Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
+        fill.setColor(Color.rgb(0, 120, 255));
+        fill.setStyle(Paint.Style.FILL);
+        Path ap = new Path();
+        ap.moveTo(cx, tipY);
+        ap.lineTo(cx + halfW, baseY);
+        ap.lineTo(cx + neckW, neckY);
+        ap.lineTo(cx - neckW, neckY);
+        ap.lineTo(cx - halfW, baseY);
+        ap.close();
+        canvas.drawPath(ap, fill);
+
+        return bmp;
     }
 }

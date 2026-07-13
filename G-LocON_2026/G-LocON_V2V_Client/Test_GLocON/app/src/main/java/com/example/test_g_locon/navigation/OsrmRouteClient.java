@@ -93,6 +93,11 @@ public class OsrmRouteClient {
                 }
             }
             System.out.println("OsrmRouteClient: 交差点数=" + intersections.size());
+            for (int k = 0; k < intersections.size(); k++) {
+                Intersection it = intersections.get(k);
+                System.out.println("OsrmRouteClient[" + k + "]: id=" + it.getIntersectionId()
+                        + " lat=" + it.getLat() + " lng=" + it.getLng());
+            }
 
         } catch (Exception e) {
             System.err.println("OsrmRouteClient エラー: " + e.getMessage());

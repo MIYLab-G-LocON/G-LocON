@@ -76,14 +76,17 @@ public class MapManager {
     /** 検索範囲を示す円ポリゴン */
     private Polygon searchCircle = null;
 
+    // ---- 自位置マーカー ----
+    private Marker myLocationMarker = null;
+
     // ---- V2V拡張フィールド ----
     /** ルートラインオーバーレイ */
     private Polyline routePolyline = null;
     /** 交差点マーカー: intersectionId → Marker */
     private final Map<String, Marker> intersectionMarkers = new HashMap<>();
     /** 交差点マーカーのアクティブ色（JOIN中）と非アクティブ色 */
-    private static final int COLOR_INTERSECTION_DEFAULT = Color.BLUE;
-    private static final int COLOR_INTERSECTION_JOINED  = Color.YELLOW;
+    private static final int COLOR_INTERSECTION_DEFAULT = Color.rgb(255, 140, 0); // オレンジ
+    private static final int COLOR_INTERSECTION_JOINED  = Color.rgb(255, 220, 0); // 黄色
 
     /**
      * [変更] 旧実装の waitUntilFinishAddMarker() は Thread.sleep(100) のビジーウェイトだった。
@@ -108,6 +111,31 @@ public class MapManager {
     /** マーカタップ時のリスナーを設定する */
     public void setOnMarkerTapListener(OnMarkerTapListener listener) {
         this.markerTapListener = listener;
+    }
+
+    // =========================================================
+    // 自位置マーカー
+    // =========================================================
+
+    /** 自位置矢印マーカーを初期化してオーバーレイに追加する */
+    public void initMyLocationMarker(Bitmap arrowBitmap) {
+        uiHandler.post(() -> {
+            myLocationMarker = new Marker(mapView);
+            myLocationMarker.setIcon(new BitmapDrawable(context.getResources(), arrowBitmap));
+            myLocationMarker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER);
+            myLocationMarker.setInfoWindow(null);
+            mapView.getOverlays().add(myLocationMarker);
+        });
+    }
+
+    /** GPS更新のたびに自位置マーカーの座標と向きを更新する */
+    public void updateMyLocation(double lat, double lng, float bearing) {
+        uiHandler.post(() -> {
+            if (myLocationMarker == null) return;
+            myLocationMarker.setPosition(new GeoPoint(lat, lng));
+            myLocationMarker.setRotation(-bearing); // osmdroidは反時計回り正
+            mapView.invalidate();
+        });
     }
 
     // =========================================================
@@ -347,19 +375,46 @@ public class MapManager {
         });
     }
 
-    /** 交差点マーカー用の小さな円アイコンを生成する */
+    /** 交差点マーカー用アイコンを生成する（デフォルト:オレンジ六角形, JOIN中:黄色） */
     private Drawable createSmallCircleIcon(int color) {
-        final int SIZE = 24;
+        final int SIZE = 36;
         Bitmap bmp = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(bmp);
         Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        // 白縁取り
+
+        float cx = SIZE / 2f;
+        float cy = SIZE / 2f;
+        float r = SIZE / 2f - 2f;
+
+        // 白縁取り六角形
         paint.setColor(Color.WHITE);
-        canvas.drawCircle(SIZE / 2f, SIZE / 2f, SIZE / 2f, paint);
-        // 本体
+        canvas.drawPath(hexagonPath(cx, cy, r + 2f), paint);
+
+        // 本体六角形
         paint.setColor(color);
-        canvas.drawCircle(SIZE / 2f, SIZE / 2f, SIZE / 2f - 3f, paint);
+        canvas.drawPath(hexagonPath(cx, cy, r), paint);
+
+        // 中央に「ES」テキスト
+        paint.setColor(Color.WHITE);
+        paint.setTextSize(10f);
+        paint.setTextAlign(Paint.Align.CENTER);
+        paint.setFakeBoldText(true);
+        canvas.drawText("ES", cx, cy + 4f, paint);
+
         return new BitmapDrawable(context.getResources(), bmp);
+    }
+
+    private Path hexagonPath(float cx, float cy, float r) {
+        Path path = new Path();
+        for (int i = 0; i < 6; i++) {
+            double angle = Math.PI / 180 * (60 * i - 30);
+            float x = cx + r * (float) Math.cos(angle);
+            float y = cy + r * (float) Math.sin(angle);
+            if (i == 0) path.moveTo(x, y);
+            else path.lineTo(x, y);
+        }
+        path.close();
+        return path;
     }
 
     // =========================================================

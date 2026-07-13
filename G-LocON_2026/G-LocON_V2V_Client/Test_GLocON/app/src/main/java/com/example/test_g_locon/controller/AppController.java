@@ -117,7 +117,7 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
     private static final long SEARCH_INTERVAL_SEC = 5;
 
     // ---- V2V拡張フィールド ----
-    private static final String MASTER_SERVER_IP   = "172.31.115.240"; // MasterServerのIP
+    private static final String MASTER_SERVER_IP   = "172.31.104.194"; // MasterServerのIP
     private static final int    MASTER_SERVER_PORT = 55556;
 
     private final IntersectionManager intersectionManager;
@@ -289,11 +289,14 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
         callback.onLocationUpdated(currentLocation, bearing, speed);
 
         // V2V: ETA計算・JOIN/LEAVE判定（速度はkm/h→m/sに変換して渡す）
-        intersectionManager.update(
-                currentLocation.getLatitude(),
-                currentLocation.getLongitude(),
-                speed / 3.6
-        );
+        // 初回GPS更新は currentLocation が初期値(35.0,136.0)のため速度が異常大になる → スキップ
+        if (totalGeoUpdateCount > 0) {
+            intersectionManager.update(
+                    currentLocation.getLatitude(),
+                    currentLocation.getLongitude(),
+                    speed / 3.6
+            );
+        }
 
         // NAT完了後のみP2P送信を行う
         if (natTravel == NAT_TRAVEL_OK) {
@@ -466,6 +469,8 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
                         intersectionManager.setIntersections(updatedIntersections);
                         System.out.println("setDestination: エッジサーバAddr確定 "
                                 + updatedIntersections.size() + "件");
+                        // 交差点マーカーを再描画（EdgeServer有無が確定した後）
+                        callback.onRouteLoaded(updatedIntersections);
                     }
             );
             masterClient.run(); // routeExecutorのスレッド内で同期実行

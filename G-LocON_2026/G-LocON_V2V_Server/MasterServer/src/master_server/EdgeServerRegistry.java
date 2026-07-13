@@ -33,8 +33,11 @@ public class EdgeServerRegistry {
                 String[] parts = line.split(",");
                 if (parts.length < 3) continue;
                 String intersectionId = parts[0].trim();
+                if (intersectionId.equalsIgnoreCase("intersectionId")) continue; // ヘッダ行スキップ
                 String ip             = parts[1].trim();
-                int    port           = Integer.parseInt(parts[2].trim());
+                int    port;
+                try { port = Integer.parseInt(parts[2].trim()); }
+                catch (NumberFormatException e) { continue; }
                 table.put(intersectionId, new EdgeServerInfo(intersectionId, ip, port));
             }
         }
