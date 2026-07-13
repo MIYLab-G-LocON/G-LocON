@@ -17,6 +17,7 @@ import com.example.test_g_locon.R;
 import com.example.test_g_locon.controller.AppController;
 import com.example.test_g_locon.controller.IAppController;
 import com.example.test_g_locon.map.MapManager;
+import com.example.test_g_locon.navigation.Intersection;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.card.MaterialCardView;
 
@@ -30,6 +31,7 @@ import java.io.File;
 import java.net.DatagramSocket;
 import java.net.SocketException;
 import java.util.ArrayList;
+import java.util.List;
 
 /**
  * アプリのメイン画面を担う Activity クラス。
@@ -50,12 +52,16 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
     // ---- UI部品 ----
     private EditText peerId;
+    private EditText destLatInput;   // 目的地緯度入力
+    private EditText destLngInput;   // 目的地経度入力
     private MaterialButton start;
     private MaterialButton end;
     private MaterialButton plus;
     private MaterialButton minus;
     private MaterialButton angle;
+    private MaterialButton routeButton; // ルート設定ボタン
     private MaterialCardView inputCard;   // peerId入力カード（開始後に非表示）
+    private MaterialCardView routeCard;  // 目的地入力カード（開始後に表示）
     private MapView mapView;
 
     // ---- 委譲先 ----
@@ -115,26 +121,30 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
     /** UI部品の取得とリスナー設定 */
     private void initViews() {
-        inputCard = findViewById(R.id.inputCard);
-        peerId    = findViewById(R.id.peerId);
-        start     = findViewById(R.id.start);
-        end       = findViewById(R.id.end);
-        plus      = findViewById(R.id.plus);
-        minus     = findViewById(R.id.minus);
-        angle     = findViewById(R.id.angle);
+        inputCard    = findViewById(R.id.inputCard);
+        routeCard    = findViewById(R.id.routeCard);
+        peerId       = findViewById(R.id.peerId);
+        destLatInput = findViewById(R.id.destLat);
+        destLngInput = findViewById(R.id.destLng);
+        start        = findViewById(R.id.start);
+        end          = findViewById(R.id.end);
+        plus         = findViewById(R.id.plus);
+        minus        = findViewById(R.id.minus);
+        angle        = findViewById(R.id.angle);
+        routeButton  = findViewById(R.id.routeButton);
 
         start.setOnClickListener(this);
         end.setOnClickListener(this);
+        routeButton.setOnClickListener(this);
 
-        // [変更] ズーム・コンパスボタンは起動直後から常時操作可能
-        // 旧実装では START ボタン後にリスナーをセットしていた
         plus.setOnClickListener(this);
         minus.setOnClickListener(this);
         angle.setOnClickListener(this);
 
-        // [変更] デフォルトが NORTH_UP なので初期ボタンテキストを "N↑" に設定
-        // （ボタンテキストは「現在のモード」を示す。押すと HEAD_UP に切り替わり "H↑" になる）
         angle.setText("N↑");
+
+        // 目的地入力カードは開始前は非表示
+        routeCard.setVisibility(View.GONE);
     }
 
     /** MapView と MapManager の初期化 */
@@ -227,6 +237,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             // [変更] 入力カード全体を非表示（旧: peerId/startだけ INVISIBLE）
             // GONE にすることでレイアウトスペースも解放し地図が広く見える
             inputCard.setVisibility(View.GONE);
+            routeCard.setVisibility(View.VISIBLE); // 目的地入力カードを表示
             end.setVisibility(View.VISIBLE);
 
             // [変更] START後に即座にナビズーム (15) へ切り替え
@@ -271,6 +282,18 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             cameraLevel = Math.max(cameraLevel - 1f, 1f);
             mapView.getController().setZoom((double) cameraLevel);
 
+        } else if (id == R.id.routeButton) {
+            // 目的地を入力してルートを取得・V2V開始
+            try {
+                double destLat = Double.parseDouble(destLatInput.getText().toString().trim());
+                double destLng = Double.parseDouble(destLngInput.getText().toString().trim());
+                appController.setDestination(destLat, destLng);
+                routeCard.setVisibility(View.GONE); // 入力後はカードを閉じる
+                showToast("ルート取得中...");
+            } catch (NumberFormatException e) {
+                showToast("緯度・経度を正しく入力してください");
+            }
+
         } else if (id == R.id.angle) {
             // [変更] ボタンテキストを短く「H↑」「N↑」に変更（旧: "HEADUP" / "NORTHUP"）
             if (cameraMode.equals(HEAD_UP)) {
@@ -310,6 +333,23 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     @Override
     public void onPeripheralUsersRefreshed(ArrayList<UserInfo> allPeripheralUsers) {
         mapManager.removeStaleMarkers(allPeripheralUsers);
+    }
+
+    @Override
+    public void onRouteLoaded(List<Intersection> intersections) {
+        mapManager.drawRoute(intersections);
+        showToast("ルート取得完了: 交差点数=" + intersections.size());
+    }
+
+    @Override
+    public void onIntersectionJoined(Intersection intersection) {
+        mapManager.updateIntersectionMarkerJoined(intersection);
+        showToast("JOIN: " + intersection.getIntersectionId());
+    }
+
+    @Override
+    public void onIntersectionLeft(Intersection intersection) {
+        mapManager.updateIntersectionMarkerLeft(intersection);
     }
 
     // =========================================================

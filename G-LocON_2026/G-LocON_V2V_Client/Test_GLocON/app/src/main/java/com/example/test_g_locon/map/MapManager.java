@@ -13,14 +13,18 @@ import android.os.Looper;
 import android.util.Log;
 
 import com.example.test_g_locon.main.UserInfo;
+import com.example.test_g_locon.navigation.Intersection;
 
 import org.osmdroid.util.GeoPoint;
 import org.osmdroid.views.MapView;
 import org.osmdroid.views.overlay.Marker;
 import org.osmdroid.views.overlay.Polygon;
+import org.osmdroid.views.overlay.Polyline;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -71,6 +75,15 @@ public class MapManager {
 
     /** 検索範囲を示す円ポリゴン */
     private Polygon searchCircle = null;
+
+    // ---- V2V拡張フィールド ----
+    /** ルートラインオーバーレイ */
+    private Polyline routePolyline = null;
+    /** 交差点マーカー: intersectionId → Marker */
+    private final Map<String, Marker> intersectionMarkers = new HashMap<>();
+    /** 交差点マーカーのアクティブ色（JOIN中）と非アクティブ色 */
+    private static final int COLOR_INTERSECTION_DEFAULT = Color.BLUE;
+    private static final int COLOR_INTERSECTION_JOINED  = Color.YELLOW;
 
     /**
      * [変更] 旧実装の waitUntilFinishAddMarker() は Thread.sleep(100) のビジーウェイトだった。
@@ -251,6 +264,102 @@ public class MapManager {
             mapView.invalidate();
             Log.d(TAG, "マーカ削除完了: 削除数=" + toRemove.size());
         });
+    }
+
+    // =========================================================
+    // V2V拡張: ルート・交差点マーカー
+    // =========================================================
+
+    /**
+     * ルートラインと交差点マーカーを地図上に描画する。
+     * onRouteLoaded() から呼ばれる。既存のルート・交差点マーカーは削除して再描画する。
+     *
+     * @param intersections ルート上の交差点リスト（ルート順）
+     */
+    public void drawRoute(List<Intersection> intersections) {
+        uiHandler.post(() -> {
+            // 既存ルートラインを削除
+            if (routePolyline != null) {
+                mapView.getOverlays().remove(routePolyline);
+            }
+            // 既存交差点マーカーを削除
+            for (Marker m : intersectionMarkers.values()) {
+                mapView.getOverlays().remove(m);
+            }
+            intersectionMarkers.clear();
+
+            // ルートライン描画
+            List<GeoPoint> points = new ArrayList<>();
+            for (Intersection i : intersections) {
+                points.add(new GeoPoint(i.getLat(), i.getLng()));
+            }
+            routePolyline = new Polyline();
+            routePolyline.setPoints(points);
+            routePolyline.getOutlinePaint().setColor(Color.rgb(0, 120, 255));
+            routePolyline.getOutlinePaint().setStrokeWidth(8f);
+            mapView.getOverlays().add(routePolyline);
+
+            // 交差点マーカー描画（エッジサーバが登録されている交差点のみ）
+            for (Intersection i : intersections) {
+                if (i.hasEdgeServer()) {
+                    addIntersectionMarker(i, false);
+                }
+            }
+            mapView.invalidate();
+            Log.d(TAG, "ルート描画完了: 交差点数=" + intersections.size());
+        });
+    }
+
+    /**
+     * 交差点マーカーの状態をJOIN済みに更新する（黄色表示）。
+     * onIntersectionJoined() から呼ばれる。
+     */
+    public void updateIntersectionMarkerJoined(Intersection intersection) {
+        updateIntersectionMarkerColor(intersection.getIntersectionId(), true);
+    }
+
+    /**
+     * 交差点マーカーの状態をLEAVE済みに戻す（青色表示）。
+     * onIntersectionLeft() から呼ばれる。
+     */
+    public void updateIntersectionMarkerLeft(Intersection intersection) {
+        updateIntersectionMarkerColor(intersection.getIntersectionId(), false);
+    }
+
+    private void addIntersectionMarker(Intersection intersection, boolean joined) {
+        Marker marker = new Marker(mapView);
+        marker.setPosition(new GeoPoint(intersection.getLat(), intersection.getLng()));
+        marker.setIcon(createSmallCircleIcon(joined ? COLOR_INTERSECTION_JOINED : COLOR_INTERSECTION_DEFAULT));
+        marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER);
+        marker.setTitle(intersection.getIntersectionId());
+        mapView.getOverlays().add(marker);
+        intersectionMarkers.put(intersection.getIntersectionId(), marker);
+    }
+
+    private void updateIntersectionMarkerColor(String intersectionId, boolean joined) {
+        uiHandler.post(() -> {
+            Marker marker = intersectionMarkers.get(intersectionId);
+            if (marker != null) {
+                marker.setIcon(createSmallCircleIcon(
+                        joined ? COLOR_INTERSECTION_JOINED : COLOR_INTERSECTION_DEFAULT));
+                mapView.invalidate();
+            }
+        });
+    }
+
+    /** 交差点マーカー用の小さな円アイコンを生成する */
+    private Drawable createSmallCircleIcon(int color) {
+        final int SIZE = 24;
+        Bitmap bmp = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bmp);
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        // 白縁取り
+        paint.setColor(Color.WHITE);
+        canvas.drawCircle(SIZE / 2f, SIZE / 2f, SIZE / 2f, paint);
+        // 本体
+        paint.setColor(color);
+        canvas.drawCircle(SIZE / 2f, SIZE / 2f, SIZE / 2f - 3f, paint);
+        return new BitmapDrawable(context.getResources(), bmp);
     }
 
     // =========================================================
