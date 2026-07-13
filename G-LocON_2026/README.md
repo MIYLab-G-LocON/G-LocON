@@ -294,7 +294,97 @@ V2Vあり vs V2Vなしを比較し，交通安全・効率への貢献を評価�
 
 ---
 
-## 8. 評価指標の優先度まとめ
+## 8. 起動手順・トラブルシューティング
+
+### 8.1 サーバ起動手順（IntelliJ IDEA）
+
+#### MasterServer の起動
+
+1. **Run → Edit Configurations...** を開く
+2. 左ペインで `master_server.StartUp` を選択
+3. **作業ディレクトリ(W)** を以下に設定する
+   ```
+   D:\Research\Program\G-LocON_2026\G-LocON_V2V_Server\MasterServer
+   ```
+4. **プログラムの引数** は空欄でよい（省略時は作業ディレクトリ直下の `edge_servers.csv` を自動参照）
+5. **適用 → OK** → △で実行
+6. コンソールに以下が表示されれば正常起動
+   ```
+   EdgeServerRegistry: 37件 ロード完了
+   MasterServer 起動: port=55556 エッジサーバ登録数=37
+   ```
+
+#### EdgeServer の起動
+
+EdgeServerは交差点1つにつき1プロセス起動する．
+
+1. **Run → Edit Configurations...** を開く
+2. `edge_server.StartUp` の構成を選択（なければ **+** で新規作成）
+3. **作業ディレクトリ(W)** を以下に設定する
+   ```
+   D:\Research\Program\G-LocON_2026\G-LocON_V2V_Server\EdgeServer
+   ```
+4. **プログラムの引数** に `交差点ID ポート番号` を空白区切りで入力する
+   ```
+   35.9515_139.6545 55600
+   ```
+5. 複数の交差点に起動する場合は構成を複数コピーして引数を変更する
+   ```
+   構成1: 35.9515_139.6545 55600
+   構成2: 35.9515_139.6548 55601
+   構成3: 35.9506_139.6545 55602
+   ```
+6. コンソールに以下が表示されれば正常起動
+   ```
+   EdgeServer 起動: intersectionId=35.9515_139.6545 port=55600
+   ```
+
+---
+
+### 8.2 Windowsファイアウォール設定
+
+AndroidからMasterServer・EdgeServerへのUDP通信がブロックされる場合，以下をPowerShell（**管理者として実行**）で実行する．
+
+```powershell
+netsh advfirewall firewall add rule name="MasterServer UDP 55556" protocol=UDP dir=in localport=55556 action=allow
+netsh advfirewall firewall add rule name="EdgeServer UDP 55600-55636" protocol=UDP dir=in localport=55600-55636 action=allow
+```
+
+各コマンドに `OK` と表示されれば設定完了．
+
+> **症状**: MasterServerが起動しているにもかかわらずAndroid側で `MasterServerClient エラー: Poll timed out` が繰り返し出力され，MasterServerコンソールに受信ログが出ない場合はファイアウォールが原因の可能性が高い．
+
+---
+
+### 8.3 ネットワーク・IPアドレス設定
+
+AndroidとPC（サーバ群）が同一WiFiネットワーク上にある必要がある．
+
+PCに複数のネットワークアダプタ（有線・無線など）がある場合，AndroidからはWiFiアダプタのIPアドレスのみ到達可能なことがある．`ipconfig` コマンドで確認し，AndroidのWiFiと同じネットワークセグメントのIPを使用すること．
+
+| 設定箇所 | ファイル | 変数名 |
+|---------|---------|--------|
+| SignalingServer / STUNServer IP | `MainActivity.java` | `SERVER_IP` |
+| MasterServer IP | `AppController.java` | `MASTER_SERVER_IP` |
+| EdgeServer IP（全交差点） | `MasterServer/edge_servers.csv` | 各行の ip フィールド |
+
+> **注意**: `edge_servers.csv` を変更した場合は MasterServer を再起動すること（起動時のみCSVを読み込む）．
+
+---
+
+### 8.4 交差点ID・edge_servers.csv の更新手順
+
+OSRMが返す交差点IDはルートや出発地座標によってわずかに変わることがある．未登録IDが発生した場合は以下の手順で対応する．
+
+1. Logcatで `OsrmRouteClient[N]: id=XXXXX` のIDを確認する
+2. MasterServerコンソールで `EdgeServerRegistry: 未登録の交差点ID=XXXXX` として出力されたIDを確認する
+3. `edge_servers.csv` に不足しているIDを追記する（ポート番号は未使用番号を割り当てる）
+4. 追加したポートに対してEdgeServerプロセスを起動する
+5. MasterServerを再起動してCSVを再読み込みする
+
+---
+
+## 9. 評価指標の優先度まとめ
 
 | 優先度 | 指標 | 軸 | 理由 |
 |--------|------|-----|------|
