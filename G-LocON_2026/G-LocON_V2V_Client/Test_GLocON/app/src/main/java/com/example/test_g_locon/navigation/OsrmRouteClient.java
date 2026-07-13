@@ -49,6 +49,22 @@ public class OsrmRouteClient {
             conn.setRequestMethod("GET");
             conn.setConnectTimeout(10000);
             conn.setReadTimeout(10000);
+            // OSRMデモサーバはUser-Agentなしのリクエストを拒否する場合がある
+            conn.setRequestProperty("User-Agent", "G-LocON-V2V/1.0");
+
+            int code = conn.getResponseCode();
+            if (code != HttpURLConnection.HTTP_OK) {
+                // エラーレスポンスの内容をログに出す
+                BufferedReader errReader = new BufferedReader(
+                        new InputStreamReader(conn.getErrorStream() != null
+                                ? conn.getErrorStream() : conn.getInputStream()));
+                StringBuilder errSb = new StringBuilder();
+                String errLine;
+                while ((errLine = errReader.readLine()) != null) errSb.append(errLine);
+                errReader.close();
+                System.err.println("OsrmRouteClient HTTP " + code + ": " + errSb);
+                return intersections;
+            }
 
             BufferedReader reader = new BufferedReader(
                     new InputStreamReader(conn.getInputStream()));
