@@ -1,5 +1,7 @@
 package com.example.test_g_locon.navigation;
 
+import android.content.Context;
+
 import com.example.test_g_locon.main.HubenyDistance;
 import com.example.test_g_locon.main.OutputToCSV;
 
@@ -35,8 +37,8 @@ public class IntersectionManager {
     // join_log.csv
     private OutputToCSV joinLog;
 
-    public IntersectionManager() {
-        joinLog = new OutputToCSV("/join_log.csv");
+    public IntersectionManager(Context context) {
+        joinLog = new OutputToCSV(context, "join_log.csv");
         joinLog.OutputFieledName("intersectionId", "t_update_ms", "eta_sec", "distance_m", "event");
     }
 

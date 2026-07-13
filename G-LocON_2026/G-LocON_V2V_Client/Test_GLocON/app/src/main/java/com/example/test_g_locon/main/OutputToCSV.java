@@ -1,5 +1,6 @@
 package com.example.test_g_locon.main;
 
+import android.content.Context;
 import android.os.Environment;
 
 import java.io.BufferedWriter;
@@ -13,15 +14,34 @@ public class OutputToCSV {
     private FileWriter fw;
     private PrintWriter pw;
 
-
-    public OutputToCSV(String fileName) {
-        file = Environment.getExternalStorageDirectory();
+    /**
+     * Android 10以降では getExternalStorageDirectory() への書き込みに
+     * WRITE_EXTERNAL_STORAGE 権限が必要だが，アプリ専用外部ストレージ
+     * (getExternalFilesDir) は権限不要で読み書きできる。
+     * ファイルは /storage/emulated/0/Android/data/com.example.test_g_locon/files/ 以下に保存される。
+     */
+    public OutputToCSV(Context context, String fileName) {
+        File dir = context.getExternalFilesDir(null);
+        if (dir == null) dir = context.getFilesDir(); // 外部ストレージ非搭載時のフォールバック
         try {
-            fw = new FileWriter(file.getPath() + fileName, false);//"/test.csv"
+            fw = new FileWriter(new File(dir, fileName), false);
         } catch (IOException e) {
             e.printStackTrace();
         }
-        pw = new PrintWriter(new BufferedWriter(fw),true);
+        pw = new PrintWriter(new BufferedWriter(fw), true);
+    }
+
+    /** 旧互換コンストラクタ（外部ストレージ直書き・権限要）*/
+    public OutputToCSV(String fileName) {
+        file = Environment.getExternalStorageDirectory();
+        try {
+            fw = new FileWriter(file.getPath() + fileName, false);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        if (fw != null) {
+            pw = new PrintWriter(new BufferedWriter(fw), true);
+        }
     }
 
     public void setFieledName(String[] name) {

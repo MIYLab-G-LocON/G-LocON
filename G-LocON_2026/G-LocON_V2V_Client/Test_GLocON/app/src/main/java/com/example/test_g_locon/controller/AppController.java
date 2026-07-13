@@ -120,7 +120,7 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
     private static final String MASTER_SERVER_IP   = "172.31.115.240"; // MasterServerのIP
     private static final int    MASTER_SERVER_PORT = 55556;
 
-    private final IntersectionManager intersectionManager = new IntersectionManager();
+    private final IntersectionManager intersectionManager;
     private final OsrmRouteClient osrmRouteClient = new OsrmRouteClient();
     private EdgeServerClient edgeServerClient;
     // ルート取得・MasterServer問い合わせ用の単一スレッド
@@ -150,6 +150,7 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
         this.currentLocation.setLongitude(initialLongitude);
 
         this.myUserInfo = new UserInfo();
+        this.intersectionManager = new IntersectionManager(context);
     }
 
     /**
@@ -188,7 +189,7 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
         p2p.signalingRegister();
 
         // V2V: EdgeServerClientを初期化（グローバルIP確定後に生成する）
-        edgeServerClient = new EdgeServerClient(myUserInfo);
+        edgeServerClient = new EdgeServerClient(context, myUserInfo);
         edgeServerClient.setCallback(new EdgeServerClient.IEdgeServerCallback() {
             @Override
             public void onJoinSent(Intersection intersection, long tJoinSentMs) {

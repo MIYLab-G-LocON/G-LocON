@@ -1,5 +1,7 @@
 package com.example.test_g_locon.intersection;
 
+import android.content.Context;
+
 import com.example.test_g_locon.main.OutputToCSV;
 import com.example.test_g_locon.main.UserInfo;
 import com.example.test_g_locon.navigation.Intersection;
@@ -33,9 +35,9 @@ public class EdgeServerClient {
     // p2p_log.csv
     private final OutputToCSV p2pLog;
 
-    public EdgeServerClient(UserInfo myUserInfo) {
+    public EdgeServerClient(Context context, UserInfo myUserInfo) {
         this.myUserInfo = myUserInfo;
-        p2pLog = new OutputToCSV("/p2p_log.csv");
+        p2pLog = new OutputToCSV(context, "p2p_log.csv");
         p2pLog.OutputFieledName(
                 "intersectionId", "t_join_sent_ms", "eta_at_join_sec", "edgeServerIp", "edgeServerPort");
     }
