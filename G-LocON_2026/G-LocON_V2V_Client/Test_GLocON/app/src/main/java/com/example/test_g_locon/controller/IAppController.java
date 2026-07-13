@@ -3,8 +3,10 @@ package com.example.test_g_locon.controller;
 import android.location.Location;
 
 import com.example.test_g_locon.main.UserInfo;
+import com.example.test_g_locon.navigation.Intersection;
 
 import java.util.ArrayList;
+import java.util.List;
 
 /**
  * [新規] AppController → MainActivity へのコールバックインターフェース。
@@ -40,4 +42,30 @@ public interface IAppController {
      * @param allPeripheralUsers 最新の周辺ユーザ全リスト
      */
     void onPeripheralUsersRefreshed(ArrayList<UserInfo> allPeripheralUsers);
+
+    // ---- V2V拡張コールバック ----
+
+    /**
+     * OSRMルート取得完了後，交差点リストが確定したときに呼ばれる。
+     * MapManagerでルートラインと交差点マーカーを描画するために使用する。
+     *
+     * @param intersections ルート上の交差点リスト（ルート順）
+     */
+    void onRouteLoaded(List<Intersection> intersections);
+
+    /**
+     * 交差点V2VグループへのJOIN完了（EdgeServerへのJOIN送信完了）時に呼ばれる。
+     * 交差点マーカーをアクティブ表示に切り替えるために使用する。
+     *
+     * @param intersection JOIN した交差点
+     */
+    void onIntersectionJoined(Intersection intersection);
+
+    /**
+     * 交差点V2VグループからのLEAVE完了時に呼ばれる。
+     * 交差点マーカーを非アクティブ表示に戻すために使用する。
+     *
+     * @param intersection LEAVE した交差点
+     */
+    void onIntersectionLeft(Intersection intersection);
 }

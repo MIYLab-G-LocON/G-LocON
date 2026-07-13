@@ -7,11 +7,16 @@ import com.example.test_g_locon.P2P.IP2P;
 import com.example.test_g_locon.P2P.P2P;
 import com.example.test_g_locon.STUNServerClient.ISTUNServerClient;
 import com.example.test_g_locon.STUNServerClient.STUNServerClient;
+import com.example.test_g_locon.intersection.EdgeServerClient;
 import com.example.test_g_locon.location.LocationProvider;
 import com.example.test_g_locon.main.HeadUp;
 import com.example.test_g_locon.main.HubenyDistance;
 import com.example.test_g_locon.main.UserInfo;
 import com.example.test_g_locon.main.UtilCommon;
+import com.example.test_g_locon.navigation.Intersection;
+import com.example.test_g_locon.navigation.IntersectionManager;
+import com.example.test_g_locon.navigation.MasterServerClient;
+import com.example.test_g_locon.navigation.OsrmRouteClient;
 
 import android.location.LocationListener;
 import android.os.Bundle;
@@ -25,6 +30,8 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
+import java.util.List;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -109,6 +116,16 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
     /** 定期 SEARCH の実行間隔 (秒) */
     private static final long SEARCH_INTERVAL_SEC = 5;
 
+    // ---- V2V拡張フィールド ----
+    private static final String MASTER_SERVER_IP   = "172.31.115.240"; // MasterServerのIP
+    private static final int    MASTER_SERVER_PORT = 55556;
+
+    private final IntersectionManager intersectionManager = new IntersectionManager();
+    private final OsrmRouteClient osrmRouteClient = new OsrmRouteClient();
+    private EdgeServerClient edgeServerClient;
+    // ルート取得・MasterServer問い合わせ用の単一スレッド
+    private final ExecutorService routeExecutor = Executors.newSingleThreadExecutor();
+
     /**
      * @param context          Activity の Context
      * @param utilCommon       グローバル設定ストア (Application クラス)
@@ -169,6 +186,31 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
         natTravel = NAT_TRAVEL_OK;
         p2p.p2pReceiverStart();
         p2p.signalingRegister();
+
+        // V2V: EdgeServerClientを初期化（グローバルIP確定後に生成する）
+        edgeServerClient = new EdgeServerClient(myUserInfo);
+        edgeServerClient.setCallback(new EdgeServerClient.IEdgeServerCallback() {
+            @Override
+            public void onJoinSent(Intersection intersection, long tJoinSentMs) {
+                callback.onIntersectionJoined(intersection);
+            }
+            @Override
+            public void onLeaveSent(Intersection intersection) {
+                callback.onIntersectionLeft(intersection);
+            }
+        });
+
+        // V2V: IntersectionManagerのJOIN/LEAVEコールバックを設定
+        intersectionManager.setCallback(new IntersectionManager.IIntersectionCallback() {
+            @Override
+            public void onShouldJoin(Intersection intersection) {
+                edgeServerClient.join(intersection);
+            }
+            @Override
+            public void onShouldLeave(Intersection intersection) {
+                edgeServerClient.leave(intersection);
+            }
+        });
 
         // [追加] GPS非依存の定期 signalingSearch スケジューラを開始。
         //
@@ -244,6 +286,13 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
 
         // UIへ位置更新を通知（地図カメラ移動はMainActivityのMapManagerが担う）
         callback.onLocationUpdated(currentLocation, bearing, speed);
+
+        // V2V: ETA計算・JOIN/LEAVE判定（速度はkm/h→m/sに変換して渡す）
+        intersectionManager.update(
+                currentLocation.getLatitude(),
+                currentLocation.getLongitude(),
+                speed / 3.6
+        );
 
         // NAT完了後のみP2P送信を行う
         if (natTravel == NAT_TRAVEL_OK) {
@@ -367,5 +416,58 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
             locationProvider.stopLocationUpdates();
             locationProvider = null; // 二重呼び出し防止
         }
+        // V2V: リソース解放
+        if (edgeServerClient != null) {
+            edgeServerClient.shutdown();
+            edgeServerClient = null;
+        }
+        intersectionManager.close();
+        routeExecutor.shutdown();
+    }
+
+    // =========================================================
+    // V2V拡張: 目的地設定・ルート取得
+    // =========================================================
+
+    /**
+     * 目的地を設定し，OSRMでルートを取得してIntersectionManagerに渡す。
+     * MasterServerへも交差点IDリストを問い合わせ，エッジサーバAddr/Portを確定する。
+     * ネットワーク通信を伴うためrouteExecutor（バックグラウンド）で実行する。
+     *
+     * @param destLat 目的地の緯度
+     * @param destLng 目的地の経度
+     */
+    public void setDestination(double destLat, double destLng) {
+        routeExecutor.submit(() -> {
+            // ① OSRM公開APIでルート上の交差点リストを取得
+            List<Intersection> intersections = osrmRouteClient.fetchIntersections(
+                    currentLocation.getLatitude(), currentLocation.getLongitude(),
+                    destLat, destLng
+            );
+            if (intersections.isEmpty()) {
+                System.err.println("setDestination: ルート取得失敗");
+                return;
+            }
+
+            // ② IntersectionManagerに交差点リストをセット（ETA/LEAVE判定開始）
+            intersectionManager.setIntersections(intersections);
+
+            // ③ UIへルート表示を通知
+            callback.onRouteLoaded(intersections);
+
+            // ④ MasterServerへ交差点IDリストを問い合わせ，エッジサーバAddrを取得
+            MasterServerClient masterClient = new MasterServerClient(
+                    MASTER_SERVER_IP, MASTER_SERVER_PORT,
+                    myUserInfo.getPublicIP(), myUserInfo.getPublicPort(),
+                    intersections,
+                    updatedIntersections -> {
+                        // エッジサーバAddr確定後，IntersectionManagerを更新
+                        intersectionManager.setIntersections(updatedIntersections);
+                        System.out.println("setDestination: エッジサーバAddr確定 "
+                                + updatedIntersections.size() + "件");
+                    }
+            );
+            masterClient.run(); // routeExecutorのスレッド内で同期実行
+        });
     }
 }
