@@ -295,4 +295,22 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintBottom_toBottomOf="parent" />
 
+    <!-- ========================================================
+         左下：仮想走行ボタン（終了ボタンの上）
+         ルート設定後に仮想走行を開始・停止する
+         ======================================================== -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/simButton"
+        style="@style/Widget.Material3.Button.OutlinedButton"
+        android:layout_width="wrap_content"
+        android:layout_height="48dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginBottom="8dp"
+        android:text="SIM"
+        android:textSize="14sp"
+        app:cornerRadius="24dp"
+        app:strokeWidth="2dp"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/end" />
+
 </androidx.constraintlayout.widget.ConstraintLayout>

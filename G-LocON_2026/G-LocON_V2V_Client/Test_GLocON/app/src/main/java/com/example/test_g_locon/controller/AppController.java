@@ -126,6 +126,18 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
     // ルート取得・MasterServer問い合わせ用の単一スレッド
     private final ExecutorService routeExecutor = Executors.newSingleThreadExecutor();
 
+    // ---- 仮想走行フィールド ----
+    /** 仮想走行スケジューラ */
+    private ScheduledExecutorService simScheduler = null;
+    /** 補間済み座標列（10mごと）上の現在インデックス */
+    private int simIndex = 0;
+    /** 補間済み座標列 [lat, lng] */
+    private List<double[]> simPath = null;
+    /** 仮想走行速度（m/s）: 約36km/h */
+    private static final double SIM_SPEED_MPS = 10.0;
+    /** 仮想走行の位置更新間隔（ミリ秒） */
+    private static final long SIM_INTERVAL_MS = 1000;
+
     /**
      * @param context          Activity の Context
      * @param utilCommon       グローバル設定ストア (Application クラス)
@@ -427,6 +439,7 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
         }
         intersectionManager.close();
         routeExecutor.shutdown();
+        stopSimulation();
     }
 
     // =========================================================
@@ -475,5 +488,82 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
             );
             masterClient.run(); // routeExecutorのスレッド内で同期実行
         });
+    }
+
+    // =========================================================
+    // 仮想走行シミュレーション
+    // =========================================================
+
+    /**
+     * 交差点リストを10mごとに線形補間した座標列を生成する。
+     * 1秒ごとに10m進む（= SIM_SPEED_MPS）ため，ETAが自然に変化しJOIN閾値を正しく通過する。
+     */
+    private List<double[]> buildSimPath(List<Intersection> intersections) {
+        HubenyDistance hubeny = new HubenyDistance();
+        List<double[]> path = new ArrayList<>();
+        for (int i = 0; i < intersections.size() - 1; i++) {
+            Intersection from = intersections.get(i);
+            Intersection to   = intersections.get(i + 1);
+            double dist  = hubeny.calcDistance(from.getLat(), from.getLng(),
+                                               to.getLat(), to.getLng());
+            int steps = Math.max(1, (int) Math.ceil(dist / SIM_SPEED_MPS));
+            for (int s = 0; s < steps; s++) {
+                double t = (double) s / steps;
+                path.add(new double[]{
+                    from.getLat() + t * (to.getLat() - from.getLat()),
+                    from.getLng() + t * (to.getLng() - from.getLng())
+                });
+            }
+        }
+        // 終点を追加
+        Intersection last = intersections.get(intersections.size() - 1);
+        path.add(new double[]{ last.getLat(), last.getLng() });
+        return path;
+    }
+
+    /**
+     * ルート上を10m/s（約36km/h）で連続移動する仮想走行を開始する。
+     * 交差点間を補間した座標列を1秒ごとに進み，ETAが正しく減少してJOIN/LEAVEが発火する。
+     * 終端に達したら自動停止する。
+     */
+    public void startSimulation() {
+        List<Intersection> list = intersectionManager.getIntersections();
+        if (list.isEmpty()) {
+            System.err.println("startSimulation: 交差点リストが空です。先にルートを設定してください。");
+            return;
+        }
+        stopSimulation();
+        simPath  = buildSimPath(list);
+        simIndex = 0;
+        simScheduler = Executors.newSingleThreadScheduledExecutor();
+        simScheduler.scheduleAtFixedRate(() -> {
+            if (simIndex >= simPath.size()) {
+                stopSimulation();
+                System.out.println("仮想走行: ルート終端に達しました");
+                return;
+            }
+            double lat = simPath.get(simIndex)[0];
+            double lng = simPath.get(simIndex)[1];
+            System.out.println("仮想走行[" + simIndex + "/" + simPath.size()
+                    + "]: lat=" + lat + " lng=" + lng);
+
+            callback.onSimulationLocationUpdated(lat, lng);
+            intersectionManager.update(lat, lng, SIM_SPEED_MPS);
+            simIndex++;
+        }, 0, SIM_INTERVAL_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+
+        System.out.println("仮想走行開始: 補間後" + simPath.size() + "ステップ speed=" + SIM_SPEED_MPS + "m/s");
+    }
+
+    /** 仮想走行を停止する */
+    public void stopSimulation() {
+        if (simScheduler != null && !simScheduler.isShutdown()) {
+            simScheduler.shutdownNow();
+            simScheduler = null;
+        }
+    }
+
+    public boolean isSimulating() {
+        return simScheduler != null && !simScheduler.isShutdown();
     }
 }

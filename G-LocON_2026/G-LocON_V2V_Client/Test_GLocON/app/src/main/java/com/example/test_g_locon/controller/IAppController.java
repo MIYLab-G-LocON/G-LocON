@@ -68,4 +68,13 @@ public interface IAppController {
      * @param intersection LEAVE した交差点
      */
     void onIntersectionLeft(Intersection intersection);
+
+    /**
+     * 仮想走行中に位置が更新されたときに呼ばれる。
+     * 地図カメラと自位置マーカーを仮想座標に移動する。
+     *
+     * @param lat 仮想緯度
+     * @param lng 仮想経度
+     */
+    void onSimulationLocationUpdated(double lat, double lng);
 }

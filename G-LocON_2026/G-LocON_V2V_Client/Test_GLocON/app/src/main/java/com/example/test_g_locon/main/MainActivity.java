@@ -65,6 +65,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private MaterialButton minus;
     private MaterialButton angle;
     private MaterialButton routeButton; // ルート設定ボタン
+    private MaterialButton simButton;   // 仮想走行ボタン
     private MaterialCardView inputCard;   // peerId入力カード（開始後に非表示）
     private MaterialCardView routeCard;  // 目的地入力カード（開始後に表示）
     private MapView mapView;
@@ -138,9 +139,12 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         angle        = findViewById(R.id.angle);
         routeButton  = findViewById(R.id.routeButton);
 
+        simButton    = findViewById(R.id.simButton);
+
         start.setOnClickListener(this);
         end.setOnClickListener(this);
         routeButton.setOnClickListener(this);
+        simButton.setOnClickListener(this);
 
         plus.setOnClickListener(this);
         minus.setOnClickListener(this);
@@ -296,6 +300,15 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 showToast("緯度・経度を正しく入力してください");
             }
 
+        } else if (id == R.id.simButton) {
+            if (appController.isSimulating()) {
+                appController.stopSimulation();
+                simButton.setText("SIM");
+            } else {
+                appController.startSimulation();
+                simButton.setText("SIM停止");
+            }
+
         } else if (id == R.id.angle) {
             // [変更] ボタンテキストを短く「H↑」「N↑」に変更（旧: "HEADUP" / "NORTHUP"）
             if (cameraMode.equals(HEAD_UP)) {
@@ -353,6 +366,14 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     @Override
     public void onIntersectionLeft(Intersection intersection) {
         mapManager.updateIntersectionMarkerLeft(intersection);
+    }
+
+    @Override
+    public void onSimulationLocationUpdated(double lat, double lng) {
+        runOnUiThread(() -> {
+            mapManager.updateCamera(lat, lng, cameraLevel, nowCameraAngle, searchRange);
+            mapManager.updateMyLocation(lat, lng, 0f);
+        });
     }
 
     // =========================================================
