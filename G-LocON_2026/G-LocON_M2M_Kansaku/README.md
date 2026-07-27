@@ -316,28 +316,33 @@ V2Vあり vs V2Vなしを比較し，交通安全・効率への貢献を評価�
 
 #### EdgeServer の起動
 
-EdgeServerは交差点1つにつき1プロセス起動する．
+EdgeServerは交差点1つにつき1プロセス起動する．起動する交差点IDは `edge_servers.csv` の有効行（`#` なし行）と一致させること．
+
+**方法A: IntelliJ の実行構成を複製する**
 
 1. **Run → Edit Configurations...** を開く
-2. `edge_server.StartUp` の構成を選択（なければ **+** で新規作成）
-3. **作業ディレクトリ(W)** を以下に設定する
+2. `edge_server.StartUp` の構成を交差点数だけ複製する（右クリック → Copy）
+3. 各構成の **プログラムの引数** に `交差点ID ポート番号` を空白区切りで入力する
    ```
-   D:\Research\Program\G-LocON_2026\G-LocON_V2V_Server\EdgeServer
+   構成ES1: 35.9515_139.6548 55601
+   構成ES2: 35.9463_139.6533 55616
+   構成ES3: 35.9476_139.6455 55625
    ```
-4. **プログラムの引数** に `交差点ID ポート番号` を空白区切りで入力する
+4. 構成名は `ES1_begin` `ES2_middle` `ES3_end` などわかりやすい名前にすること（同名だと並列起動できない）
+5. コンソールに以下が表示されれば正常起動
    ```
-   35.9515_139.6545 55600
+   EdgeServer 起動: intersectionId=35.9515_139.6548 port=55601
    ```
-5. 複数の交差点に起動する場合は構成を複数コピーして引数を変更する
-   ```
-   構成1: 35.9515_139.6545 55600
-   構成2: 35.9515_139.6548 55601
-   構成3: 35.9506_139.6545 55602
-   ```
-6. コンソールに以下が表示されれば正常起動
-   ```
-   EdgeServer 起動: intersectionId=35.9515_139.6545 port=55600
-   ```
+
+**方法B: バッチファイルで起動する（IntelliJ不要）**
+
+`G-LocON_V2V_Server/EdgeServer/` に以下のバッチファイルを用意している．ダブルクリックで起動できる．
+
+| ファイル | 交差点 | ポート |
+|---------|--------|--------|
+| `start_ES1_begin.bat` | 35.9515_139.6548 | 55601 |
+| `start_ES2_middle.bat` | 35.9463_139.6533 | 55616 |
+| `start_ES3_end.bat` | 35.9476_139.6455 | 55625 |
 
 ---
 
@@ -346,12 +351,13 @@ EdgeServerは交差点1つにつき1プロセス起動する．
 AndroidからMasterServer・EdgeServerへのUDP通信がブロックされる場合，以下をPowerShell（**管理者として実行**）で実行する．
 
 ```powershell
-netsh advfirewall firewall add rule name="MasterServer UDP 55556" protocol=UDP dir=in localport=55556 action=allow
-netsh advfirewall firewall add rule name="EdgeServer UDP 55600-55636" protocol=UDP dir=in localport=55600-55636 action=allow
+netsh advfirewall firewall add rule name="G-LocON UDP IN" protocol=UDP dir=in localport=55554-55639 action=allow profile=any
 ```
 
-各コマンドに `OK` と表示されれば設定完了．
+`OK` と表示されれば設定完了．
 
+> **重要**: `profile=any` を必ず付けること．省略するとモバイルホットスポット・テザリング経由の接続（プロファイル: パブリック）でブロックされる．
+>
 > **症状**: MasterServerが起動しているにもかかわらずAndroid側で `MasterServerClient エラー: Poll timed out` が繰り返し出力され，MasterServerコンソールに受信ログが出ない場合はファイアウォールが原因の可能性が高い．
 
 ---
@@ -372,15 +378,76 @@ PCに複数のネットワークアダプタ（有線・無線など）がある
 
 ---
 
-### 8.4 交差点ID・edge_servers.csv の更新手順
+### 8.4 edge_servers.csv の管理
 
-OSRMが返す交差点IDはルートや出発地座標によってわずかに変わることがある．未登録IDが発生した場合は以下の手順で対応する．
+#### テスト時のEdgeServer切り替え方法（コメントアウト方式）
+
+CSVには全交差点を記載し，起動するEdgeServerの行だけ有効にする．`#` 始まりの行はMasterServerが無視するため，アプリのマップには有効行のみマーカー表示される．
+
+```csv
+# 有効（マーカー表示・JOIN/LEAVE対象）
+35.9515_139.6548,172.20.10.4,55601
+# 無効（コメントアウト・マーカー非表示）
+#35.9506_139.6545,172.20.10.4,55602
+```
+
+**切り替え手順**:
+1. `edge_servers.csv` を編集（使いたい行の `#` を外す／使わない行に `#` を付ける）
+2. 有効にした行のポートでEdgeServerを起動する
+3. MasterServerを再起動する（起動時のみCSVを読み込むため）
+
+#### 交差点IDが未登録の場合
+
+OSRMが返す交差点IDとCSVのIDが一致しない場合は以下の手順で対応する．
 
 1. Logcatで `OsrmRouteClient[N]: id=XXXXX` のIDを確認する
-2. MasterServerコンソールで `EdgeServerRegistry: 未登録の交差点ID=XXXXX` として出力されたIDを確認する
+2. MasterServerコンソールで `EdgeServerRegistry: 未登録の交差点ID=XXXXX` を確認する
 3. `edge_servers.csv` に不足しているIDを追記する（ポート番号は未使用番号を割り当てる）
 4. 追加したポートに対してEdgeServerプロセスを起動する
-5. MasterServerを再起動してCSVを再読み込みする
+5. MasterServerを再起動する
+
+> **参考**: MasterServerの近傍検索閾値は30m（`EdgeServerRegistry.java` の `PROXIMITY_THRESHOLD_M`）．CSVのIDとOSRMのIDが30m以内であれば自動的に近傍一致する．
+
+---
+
+### 8.5 iPhoneテザリングでの通信不可
+
+**症状**: iPhoneのテザリングを使用すると，同一ネットワーク上のAndroid→PCへのUDP通信ができない．
+
+**原因**: iPhoneのテザリングはクライアント間通信を遮断する（クライアントアイソレーション）ため，AndroidからPCへのUDPパケットが届かない．
+
+**対処**: iPhoneのテザリングを使わず，**PCのモバイルホットスポット**（Windowsの「モバイルホットスポット」機能）でネットワークを共有する．
+
+| 設定箇所 | 値 |
+|---------|-----|
+| `MainActivity.java` の `SERVER_IP` | `192.168.137.1`（PC モバイルホットスポット側IP） |
+| `AppController.java` の `MASTER_SERVER_IP` | `192.168.137.1` |
+| `edge_servers.csv` の ip フィールド | `192.168.137.1` |
+
+---
+
+### 8.6 仮想位置モード（屋内テスト・実験場所以外でのデバッグ）
+
+実験予定地点にいない場合でも，仮想位置を使ってSIMを動かしてV2Vロジックをデバッグできる．
+
+**手順**:
+1. アプリの「スタート」ボタンで通信を開始する
+2. ピアID・目的地を入力してルートを取得する
+3. **「仮想位置」ボタン**を押す → カメラが仮想座標（コード内 `TEST_LATITUDE/LONGITUDE`）に移動する
+4. **「SIM」ボタン**を押す → 仮想位置を起点にルート上を10m/sで自動走行する
+5. 交差点に近づくとJOIN（緑マーカー），離れるとLEAVE（グレー）に変化する
+
+> **注意**: 仮想位置モード中はGPSによる位置更新・速度計算が無効になる．これはGPS位置と仮想位置が離れている場合に生じる異常速度計算（数万km/h）によるETA誤算を防ぐためである．SIM走行はこの制約の影響を受けない．
+
+---
+
+### 8.7 SignalingServerへのゴーストピア残留
+
+**症状**: アプリを強制終了・再インストールした後，前回起動時のピア情報が別端末として検出され続ける．
+
+**原因**: DELETEが送られずにサーバ側にエントリが残留する（電池切れ・強制終了時はDELETEを送れない）．
+
+**対処**: SignalingServerにTTL（30秒）を実装済み．SEARCHパケット（5秒ごと送信）をハートビートとして使用し，30秒間SEARCHを受信しなかったエントリは自動削除される．通常は再インストール後30〜40秒で消える．
 
 ---
 

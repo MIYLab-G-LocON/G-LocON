@@ -84,9 +84,9 @@ public class MapManager {
     private Polyline routePolyline = null;
     /** 交差点マーカー: intersectionId → Marker */
     private final Map<String, Marker> intersectionMarkers = new HashMap<>();
-    /** 交差点マーカーのアクティブ色（JOIN中）と非アクティブ色 */
-    private static final int COLOR_INTERSECTION_DEFAULT = Color.rgb(255, 140, 0); // オレンジ
-    private static final int COLOR_INTERSECTION_JOINED  = Color.rgb(255, 220, 0); // 黄色
+    /** 交差点マーカー色: JOIN前=グレー, JOIN中=緑 */
+    private static final int COLOR_INTERSECTION_DEFAULT = Color.rgb(150, 150, 150); // グレー
+    private static final int COLOR_INTERSECTION_JOINED  = Color.rgb(0, 200, 80);   // 緑
 
     /**
      * [変更] 旧実装の waitUntilFinishAddMarker() は Thread.sleep(100) のビジーウェイトだった。

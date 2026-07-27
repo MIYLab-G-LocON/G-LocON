@@ -35,34 +35,47 @@ public class STUNServerClientSender implements Runnable {
      */
     @Override
     public void run() {
-        UtilCommon utilCommon = (UtilCommon) UtilCommon.getAppContext();
-        String stunServerIP = utilCommon.getStunServerIP();
-        int stunServerPort = utilCommon.getStunServerPort();
-
-        boolean helloSent = false;
-        while (!Thread.currentThread().isInterrupted()) {
-            try {
-                String sendMsg = helloSent ? "Ping" : "Hello";
-                byte[] sendData = sendMsg.getBytes();
-                DatagramPacket sendPacket = new DatagramPacket(
-                        sendData, sendData.length,
-                        InetAddress.getByName(stunServerIP), stunServerPort
-                );
-                socket.send(sendPacket);
-
-                if (!helloSent) {
-                    helloSent = true;
-                    // Hello 送信直後に Receiver を起動してグローバルIP・Portを取得する
-                    callback.onSendFinishMsgToStun();
-                }
-
-                Thread.sleep(PING_INTERVAL_MS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            } catch (Exception e) {
-                Log.d(TAG, "送信エラー: " + e);
+        Log.e(TAG, "run() 開始");
+        try {
+            UtilCommon utilCommon = (UtilCommon) UtilCommon.getAppContext();
+            if (utilCommon == null) {
+                Log.e(TAG, "UtilCommon が null です");
+                return;
             }
+            String stunServerIP = utilCommon.getStunServerIP();
+            int stunServerPort = utilCommon.getStunServerPort();
+            Log.e(TAG, "接続先: " + stunServerIP + ":" + stunServerPort);
+            Log.e(TAG, "ソケット状態: closed=" + socket.isClosed() + " bound=" + socket.isBound());
+
+            boolean helloSent = false;
+            while (!Thread.currentThread().isInterrupted()) {
+                try {
+                    String sendMsg = helloSent ? "Ping" : "Hello";
+                    Log.e(TAG, sendMsg + " 送信中 → " + stunServerIP + ":" + stunServerPort);
+                    byte[] sendData = sendMsg.getBytes();
+                    DatagramPacket sendPacket = new DatagramPacket(
+                            sendData, sendData.length,
+                            InetAddress.getByName(stunServerIP), stunServerPort
+                    );
+                    socket.send(sendPacket);
+                    Log.e(TAG, sendMsg + " 送信完了");
+
+                    if (!helloSent) {
+                        helloSent = true;
+                        callback.onSendFinishMsgToStun();
+                    }
+
+                    Thread.sleep(PING_INTERVAL_MS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                } catch (Exception e) {
+                    Log.e(TAG, "送信エラー: " + e);
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "run() 初期化エラー: " + e);
         }
+        Log.e(TAG, "run() 終了");
     }
 }

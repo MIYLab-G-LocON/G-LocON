@@ -18,8 +18,9 @@ import java.util.Map;
  */
 public class EdgeServerRegistry {
 
-    /** 近傍検索の閾値（メートル）。この距離以内なら同じ交差点とみなす */
-    private static final double PROXIMITY_THRESHOLD_M = 15.0;
+    /** 近傍検索の閾値（メートル）。この距離以内なら同じ交差点とみなす
+     *  OSRMの返す座標とCSVの座標が最大20m程度ずれる場合があるため30mに設定 */
+    private static final double PROXIMITY_THRESHOLD_M = 30.0;
 
     private final Map<String, EdgeServerInfo> table = new HashMap<>();
 

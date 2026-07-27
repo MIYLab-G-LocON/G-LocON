@@ -50,8 +50,8 @@ public class EdgeServerSend extends Thread {
                         InetAddress.getByName(peer.getPublicIP()), peer.getPublicPort()
                 );
                 socket.send(packet);
-                System.out.println("NAT_REGISTER: " + srcUser.getPeerId()
-                        + " の情報を " + peer.getPeerId() + " へ送信");
+                System.out.printf("[NAT ] new=%s → existing=%s%n",
+                        srcUser.getPeerId(), peer.getPeerId());
             }
         } catch (Exception e) {
             System.err.println("NAT_REGISTER 送信エラー: " + e.getMessage());
@@ -70,8 +70,7 @@ public class EdgeServerSend extends Thread {
                     InetAddress.getByName(srcUser.getPublicIP()), srcUser.getPublicPort()
             );
             socket.send(packet);
-            System.out.println("REPLY_RESULT: " + srcUser.getPeerId()
-                    + " へメンバー一覧 " + peerList.size() + "件 を返送");
+            // ログはEdgeServerReceive側で出力済みのため省略
         } catch (Exception e) {
             System.err.println("REPLY_RESULT 送信エラー: " + e.getMessage());
             e.printStackTrace();

@@ -64,8 +64,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private MaterialButton plus;
     private MaterialButton minus;
     private MaterialButton angle;
-    private MaterialButton routeButton; // ルート設定ボタン
-    private MaterialButton simButton;   // 仮想走行ボタン
+    private MaterialButton routeButton;   // ルート設定ボタン
+    private MaterialButton simButton;    // 仮想走行ボタン
+    private MaterialButton virtPosButton; // 仮想位置ボタン
     private MaterialCardView inputCard;   // peerId入力カード（開始後に非表示）
     private MaterialCardView routeCard;  // 目的地入力カード（開始後に表示）
     private MapView mapView;
@@ -92,13 +93,16 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private final double searchRange = 200;
 
     // TODO: サーバのIPアドレスを設定してください
-    private static final String SERVER_IP = "172.31.104.194"; //研究室
+//    private static final String SERVER_IP = "172.31.104.194"; //研究室
 //    private static final String SERVER_IP = "192.168.0.207"; // 自宅
-    // TODO: 仮想位置を使用する場合は true に変更してください
+//    private static final String SERVER_IP = "172.20.10.4"; // テザリング
+    private static final String SERVER_IP = "192.168.137.1"; // PCホットスポット
     private static final boolean USE_VIRTUAL_POSITION = false;
-    // TODO: 仮想位置の緯度・経度を設定してください（デフォルト: 日本付近）
     private static final double INITIAL_LATITUDE  = 35.0;
     private static final double INITIAL_LONGITUDE = 136.0;
+    // 仮想位置ボタンで使う実験場所の座標
+    private static final double TEST_LATITUDE  = 35.952087073130784;
+    private static final double TEST_LONGITUDE = 139.65523278088918;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -108,7 +112,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
         // osmdroid 設定（setContentView より前に必須）
-        Configuration.getInstance().setUserAgentValue(getPackageName());
+        Configuration.getInstance().setUserAgentValue("GLocON-V2V/1.0 (com.example.test_g_locon)");
         Configuration.getInstance().setOsmdroidBasePath(getCacheDir());
         Configuration.getInstance().setOsmdroidTileCache(new File(getCacheDir(), "osmdroid"));
 
@@ -139,12 +143,14 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         angle        = findViewById(R.id.angle);
         routeButton  = findViewById(R.id.routeButton);
 
-        simButton    = findViewById(R.id.simButton);
+        simButton     = findViewById(R.id.simButton);
+        virtPosButton = findViewById(R.id.virtPosButton);
 
         start.setOnClickListener(this);
         end.setOnClickListener(this);
         routeButton.setOnClickListener(this);
         simButton.setOnClickListener(this);
+        virtPosButton.setOnClickListener(this);
 
         plus.setOnClickListener(this);
         minus.setOnClickListener(this);
@@ -163,7 +169,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     /** MapView と MapManager の初期化 */
     private void initMap() {
         mapView = findViewById(R.id.mapFragment);
-        mapView.setTileSource(TileSourceFactory.MAPNIK);
+        mapView.setTileSource(new org.osmdroid.tileprovider.tilesource.XYTileSource(
+                "OSM_JP", 0, 18, 256, ".png",
+                new String[]{"https://tile.openstreetmap.jp/"}));
         mapView.setMultiTouchControls(true);
 
         // [変更] 初期ズーム 4（大陸スケール）+ 日本付近を初期中心に
@@ -202,9 +210,15 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     // ライフサイクル
     // =========================================================
 
+    private static final org.osmdroid.tileprovider.tilesource.ITileSource OSM_JP_SOURCE =
+            new org.osmdroid.tileprovider.tilesource.XYTileSource(
+                    "OSM_JP", 0, 18, 256, ".png",
+                    new String[]{"https://tile.openstreetmap.jp/"});
+
     @Override
     protected void onResume() {
         super.onResume();
+        mapView.setTileSource(OSM_JP_SOURCE);
         mapView.onResume();
     }
 
@@ -299,6 +313,12 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             } catch (NumberFormatException e) {
                 showToast("緯度・経度を正しく入力してください");
             }
+
+        } else if (id == R.id.virtPosButton) {
+            appController.setVirtualPosition(TEST_LATITUDE, TEST_LONGITUDE);
+            cameraLevel = 18.0f;
+            mapView.getController().setZoom((double) cameraLevel);
+            showToast("仮想位置に移動しました");
 
         } else if (id == R.id.simButton) {
             if (appController.isSimulating()) {

@@ -10,6 +10,8 @@ public class UserInfo {
     private double latitude;
     private double longitude;
     private String peerId;
+    /** 最後にREGISTER/UPDATEを受信した時刻（TTL管理用） */
+    private long lastUpdatedMs = System.currentTimeMillis();
     //private double speed;
 
 
@@ -133,18 +135,9 @@ public class UserInfo {
 		this.speed = speed;
 	}
 	*/
-	/**
-	 * @return peerId
-	 */
-	public String getPeerId() {
-		return peerId;
-	}
-	/**
-	 * @param peerId セットする peerId
-	 */
-	public void setPeerId(String peerId) {
-		this.peerId = peerId;
-	}
+	public String getPeerId() { return peerId; }
+	public void setPeerId(String peerId) { this.peerId = peerId; }
 
-
+	public long getLastUpdatedMs() { return lastUpdatedMs; }
+	public void touchLastUpdated() { this.lastUpdatedMs = System.currentTimeMillis(); }
 }

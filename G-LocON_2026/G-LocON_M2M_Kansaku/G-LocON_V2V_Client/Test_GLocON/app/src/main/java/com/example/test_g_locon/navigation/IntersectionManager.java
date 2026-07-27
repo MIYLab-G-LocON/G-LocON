@@ -75,7 +75,8 @@ public class IntersectionManager {
             double eta = dist / speed;
             intersection.setEtaSec(eta);
 
-            if (!intersection.isJoined() && intersection.hasEdgeServer()) {
+            if (!intersection.isJoined() && !intersection.hasJoinedAndLeft()
+                    && intersection.hasEdgeServer()) {
                 // JOIN判定: ETA < τ
                 if (eta < ETA_THRESHOLD_SEC) {
                     intersection.setJoined(true);
@@ -86,6 +87,7 @@ public class IntersectionManager {
                 // LEAVE判定: d ≥ δ かつ 距離が増加
                 if (intersection.shouldLeave(LEAVE_THRESHOLD_M)) {
                     intersection.setJoined(false);
+                    intersection.setHasJoinedAndLeft(true); // 同一交差点への再JOINを防ぐ
                     logJoin(intersection, now, "LEAVE");
                     if (callback != null) callback.onShouldLeave(intersection);
                 }
@@ -101,6 +103,16 @@ public class IntersectionManager {
                 String.format("%.1f", i.getDistanceM()),
                 event
         );
+    }
+
+    /** SIM開始前に呼び出し，全交差点のJOIN/LEAVE状態と距離履歴を初期化する */
+    public void resetAllJoinState() {
+        for (Intersection i : intersections) {
+            i.setJoined(false);
+            i.setHasJoinedAndLeft(false);
+            i.resetDistanceHistory();
+        }
+        android.util.Log.i("IntersectionManager", "全交差点のJOIN状態をリセット: " + intersections.size() + "件");
     }
 
     public void close() {

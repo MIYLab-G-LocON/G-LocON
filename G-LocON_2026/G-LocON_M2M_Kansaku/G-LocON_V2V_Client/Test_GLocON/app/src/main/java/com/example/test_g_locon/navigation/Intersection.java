@@ -21,7 +21,8 @@ public class Intersection {
     private double distanceM;   // 現在地からの距離（メートル）
     private double prevDistanceM = -1; // 前回の距離（LEAVE判定用）
 
-    private boolean joined = false; // このセッションでJOIN済みか
+    private boolean joined = false;          // 現在JOIN中か
+    private boolean hasJoinedAndLeft = false; // 一度JOIN→LEAVEした交差点は再JOINしない
 
     public Intersection(String intersectionId, double lat, double lng) {
         this.intersectionId = intersectionId;
@@ -54,8 +55,17 @@ public class Intersection {
         this.distanceM = distanceM;
     }
 
-    public boolean isJoined()         { return joined; }
-    public void setJoined(boolean joined) { this.joined = joined; }
+    public boolean isJoined()              { return joined; }
+    public void setJoined(boolean joined)  { this.joined = joined; }
 
-    public boolean hasEdgeServer()    { return edgeServerIp != null; }
+    public boolean hasJoinedAndLeft()      { return hasJoinedAndLeft; }
+    public void setHasJoinedAndLeft(boolean v) { this.hasJoinedAndLeft = v; }
+
+    /** SIM再起動時に距離履歴もリセットする */
+    public void resetDistanceHistory() {
+        this.distanceM = 0.0;
+        this.prevDistanceM = -1;
+    }
+
+    public boolean hasEdgeServer()         { return edgeServerIp != null; }
 }

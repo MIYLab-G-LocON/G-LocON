@@ -31,17 +31,20 @@ public class STUNServerClientReceiver implements Runnable {
      */
     @Override
     public void run() {
+        Log.e(TAG, "受信待機開始");
         DatagramPacket receivePacket = new DatagramPacket(new byte[128], 128);
         try {
             socket.receive(receivePacket);
             String allData = new String(receivePacket.getData(), 0, receivePacket.getLength());
-            Log.d(TAG, "受信データ: " + allData);
+            Log.e(TAG, "受信データ: " + allData);
             String[] parts = allData.split("-", 2);
             String addr = parts[0];
             int port = Integer.parseInt(parts[1]);
+            Log.e(TAG, "グローバルIP=" + addr + " Port=" + port);
             callback.onReceiveMsgFromStun(addr, port);
         } catch (Exception e) {
-            Log.d(TAG, "受信エラー: " + e);
+            Log.e(TAG, "受信エラー: " + e);
         }
+        Log.e(TAG, "受信終了");
     }
 }

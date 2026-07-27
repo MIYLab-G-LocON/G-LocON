@@ -117,7 +117,7 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
     private static final long SEARCH_INTERVAL_SEC = 5;
 
     // ---- V2V拡張フィールド ----
-    private static final String MASTER_SERVER_IP   = "172.31.104.194"; // MasterServerのIP
+    private static final String MASTER_SERVER_IP   = "172.20.10.4"; // テザリング
     private static final int    MASTER_SERVER_PORT = 55556;
 
     private final IntersectionManager intersectionManager;
@@ -262,6 +262,11 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
      */
     @Override
     public void onLocationChanged(Location geo) {
+        // 仮想位置モード: GPS速度が virtual-to-GPS 距離から計算され異常大になるため
+        // intersectionManager.update() と UI更新をすべてスキップする。
+        // searchScheduler が5秒ごとに SEARCH を送り続けるため P2P 接続は維持される。
+        if (useVirtualPosition) return;
+
         // 進行方向の計算（北を0度とする方位角）
         double bearing = new HeadUp(
                 currentLocation.getLatitude(), currentLocation.getLongitude(),
@@ -533,6 +538,9 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
             return;
         }
         stopSimulation();
+        // 仮想位置モード中に GPS が引き起こした誤JOIN/LEAVEをリセットし
+        // SIM開始から正しい JOIN/LEAVE シーケンスを開始できるようにする。
+        intersectionManager.resetAllJoinState();
         simPath  = buildSimPath(list);
         simIndex = 0;
         simScheduler = Executors.newSingleThreadScheduledExecutor();
@@ -565,5 +573,22 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
 
     public boolean isSimulating() {
         return simScheduler != null && !simScheduler.isShutdown();
+    }
+
+    /**
+     * 仮想位置を設定する。
+     * 呼び出し後は GPS 更新で位置が上書きされなくなる。
+     * SIM走行の起点にもなる。
+     */
+    public void setVirtualPosition(double lat, double lng) {
+        useVirtualPosition = true;
+        currentLocation.setLatitude(lat);
+        currentLocation.setLongitude(lng);
+        myUserInfo.setLatitude(lat);
+        myUserInfo.setLongitude(lng);
+        // SIM実行中はSIMが位置を制御するためカメラ移動しない
+        if (!isSimulating()) {
+            callback.onLocationUpdated(currentLocation, 0, 0);
+        }
     }
 }

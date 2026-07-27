@@ -3,59 +3,53 @@ package signaling_server;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
- * [新規] シグナリングサーバが管理する登録ユーザ一覧のスレッドセーフなレジストリ。
+ * シグナリングサーバが管理するユーザ一覧のレジストリ。
  *
- * 旧実装では SignalingServerReceive がフィールドに ArrayList<UserInfo> を持ち、
- * 複数スレッド（受信スレッド + 複数の SignalingServerSend スレッド）から
- * synchronized なしで操作していたため ConcurrentModificationException のリスクがあった。
+ * 問題: 端末が強制終了・電池切れ・再インストール等でDELETEを送信できない場合、
+ *      古いエントリがサーバに残り続け、ゴーストピアとして他端末のSEARCH結果に出続ける。
  *
- * このクラスに切り出すことで:
- *   1. スレッドセーフな CopyOnWriteArrayList で内部管理する
- *   2. ユーザリストの CRUD を一箇所に集約し、バグ修正箇所を明確にする
- *   3. SignalingServerReceive はユーザリストの実装を知らなくてよくなる
+ * 対策: TTLベースの自動削除
+ *   - REGISTER / UPDATE / SEARCH を受信するたびにそのエントリのタイムスタンプを更新する
+ *   - SEARCHは5秒ごとに必ず送られるためハートビートとして機能する
+ *   - TTL_SEC 秒間何も受信しなければゴーストと判断して自動削除する
  */
 public class UserRegistry {
 
-    /**
-     * [変更] ArrayList → CopyOnWriteArrayList に変更。
-     * 読み取り（search）が多く書き込み（register/update/delete）が少ないため
-     * CopyOnWriteArrayList が適している。書き込み時にコピーを作るため
-     * イテレーション中の ConcurrentModificationException が発生しない。
-     */
-    private final List<UserInfo> userList = new CopyOnWriteArrayList<>();
+    /** エントリの有効期限（秒）。SEARCHが5秒ごとなのでその数倍を設定 */
+    private static final long TTL_SEC = 30;
+    /** TTLチェックの実行間隔（秒） */
+    private static final long TTL_CHECK_INTERVAL_SEC = 10;
 
-    /**
-     * ユーザを登録する。
-     * @param userInfo 登録するユーザ情報
-     */
+    private final List<UserInfo> userList = new CopyOnWriteArrayList<>();
+    private final ScheduledExecutorService ttlScheduler = Executors.newSingleThreadScheduledExecutor();
+
+    public UserRegistry() {
+        ttlScheduler.scheduleAtFixedRate(this::removeExpiredEntries,
+                TTL_CHECK_INTERVAL_SEC, TTL_CHECK_INTERVAL_SEC, TimeUnit.SECONDS);
+    }
+
+    /** ユーザを新規登録する */
     public void register(UserInfo userInfo) {
+        userInfo.touchLastUpdated();
         userList.add(userInfo);
-        System.out.println("REGISTER: ユーザ数=" + userList.size()
-                + " peerId=" + userInfo.getPeerId());
+        System.out.println("REGISTER(新規): peerId=" + userInfo.getPeerId()
+                + " ユーザ数=" + userList.size());
     }
 
     /**
      * ユーザ情報を更新する。
-     * publicIP + publicPort + privateIP + privatePort の4要素で同一ユーザを判定する。
-     *
-     * [バグ修正] 旧実装: userInfo.getPublicIP().equals(userInfo.getPublicIP())
-     *   → 自身と自身を比較する typo で常に true になっていた。
-     *   正しくは userInfoList.get(i).getPublicIP().equals(userInfo.getPublicIP()) と
-     *   リスト要素 と 引数 を比較する。
-     *
-     * @param userInfo 更新後のユーザ情報
+     * UPDATEはGPS更新ごとに送られるため、ハートビートを兼ねてタイムスタンプを更新する。
      */
     public void update(UserInfo userInfo) {
         for (int i = 0; i < userList.size(); i++) {
             UserInfo existing = userList.get(i);
-            // [バグ修正] 旧: userInfo.getPublicIP().equals(userInfo.getPublicIP()) （自己比較→常にtrue）
-            //            新: existing.getPublicIP().equals(userInfo.getPublicIP())  （正しい比較）
-            if (existing.getPublicIP().equals(userInfo.getPublicIP())
-                    && existing.getPublicPort() == userInfo.getPublicPort()
-                    && existing.getPrivateIP().equals(userInfo.getPrivateIP())
-                    && existing.getPrivatePort() == userInfo.getPrivatePort()) {
+            if (isSameUser(existing, userInfo)) {
+                userInfo.touchLastUpdated();
                 userList.set(i, userInfo);
                 System.out.println("UPDATE: peerId=" + userInfo.getPeerId());
                 return;
@@ -64,50 +58,38 @@ public class UserRegistry {
         System.out.println("UPDATE: 対象ユーザが見つからなかった peerId=" + userInfo.getPeerId());
     }
 
-    /**
-     * ユーザを削除する。
-     * @param userInfo 削除するユーザ情報
-     */
+    /** ユーザを削除する */
     public void delete(UserInfo userInfo) {
-        boolean removed = userList.removeIf(existing ->
-                existing.getPublicIP().equals(userInfo.getPublicIP())
-                        && existing.getPublicPort() == userInfo.getPublicPort()
-                        && existing.getPrivateIP().equals(userInfo.getPrivateIP())
-                        && existing.getPrivatePort() == userInfo.getPrivatePort()
-        );
+        boolean removed = userList.removeIf(existing -> isSameUser(existing, userInfo));
         System.out.println("DELETE: " + (removed ? "成功" : "対象なし")
                 + " peerId=" + userInfo.getPeerId() + " ユーザ数=" + userList.size());
     }
 
     /**
-     * 指定ユーザの位置から searchDistance メートル以内にいる他ユーザを返す。
-     * 検索元ユーザ自身は結果に含まれない。
-     *
-     * @param searcher       検索を行ったユーザ
-     * @param searchDistance 検索半径 (メートル)
-     * @return 検索結果の周辺ユーザ一覧（スナップショット）
+     * 周辺ユーザを検索し、SEARCHを送ってきたユーザのタイムスタンプを更新する。
+     * SEARCHは5秒ごとに必ず送られるためハートビートとして機能する。
      */
     public ArrayList<UserInfo> search(UserInfo searcher, double searchDistance) {
+        // SEARCHをハートビートとして扱い、タイムスタンプを更新する
+        for (int i = 0; i < userList.size(); i++) {
+            UserInfo existing = userList.get(i);
+            if (isSameUser(existing, searcher)) {
+                existing.touchLastUpdated();
+                break;
+            }
+        }
+
         ArrayList<UserInfo> results = new ArrayList<>();
         HubenyDistance hubenyDistance = new HubenyDistance();
 
         for (UserInfo candidate : userList) {
-            // 自分自身は除外
-            if (candidate.getPublicIP().equals(searcher.getPublicIP())
-                    && candidate.getPublicPort() == searcher.getPublicPort()
-                    && candidate.getPrivateIP().equals(searcher.getPrivateIP())
-                    && candidate.getPrivatePort() == searcher.getPrivatePort()) {
-                continue;
-            }
+            if (isSameUser(candidate, searcher)) continue;
 
             double distance = hubenyDistance.calcDistance(
                     searcher.getLatitude(), searcher.getLongitude(),
                     candidate.getLatitude(), candidate.getLongitude()
             );
 
-            // [追加] 常に距離ログを出力（ヒット・ミスともに）
-            // ログを見て "距離=Xm, 閾値=Ym, miss" が続く場合は
-            // クライアントの searchRange を増やすか、GPS精度を確認する
             if (distance <= searchDistance) {
                 System.out.printf("検索ヒット: %s と %s の距離=%.1fm (閾値=%.0fm)%n",
                         searcher.getPeerId(), candidate.getPeerId(), distance, searchDistance);
@@ -120,8 +102,35 @@ public class UserRegistry {
         return results;
     }
 
-    /** 現在の登録ユーザ数を返す */
-    public int size() {
-        return userList.size();
+    /** TTL期限切れエントリを削除する（10秒ごとに実行） */
+    private void removeExpiredEntries() {
+        long now = System.currentTimeMillis();
+        long ttlMs = TTL_SEC * 1000;
+        List<UserInfo> expired = new ArrayList<>();
+        for (UserInfo u : userList) {
+            if (now - u.getLastUpdatedMs() > ttlMs) {
+                expired.add(u);
+            }
+        }
+        if (!expired.isEmpty()) {
+            userList.removeAll(expired);
+            for (UserInfo u : expired) {
+                System.out.printf("[TTL削除] peerId=%s 最終受信から%d秒経過%n",
+                        u.getPeerId(), (now - u.getLastUpdatedMs()) / 1000);
+            }
+            System.out.println("[TTL削除後] 残ユーザ数=" + userList.size());
+        }
     }
+
+    /** publicIP + publicPort + privateIP + privatePort の4要素で同一ユーザを判定 */
+    private boolean isSameUser(UserInfo a, UserInfo b) {
+        return a.getPublicIP().equals(b.getPublicIP())
+                && a.getPublicPort() == b.getPublicPort()
+                && a.getPrivateIP().equals(b.getPrivateIP())
+                && a.getPrivatePort() == b.getPrivatePort();
+    }
+
+    public int size() { return userList.size(); }
+
+    public void shutdown() { ttlScheduler.shutdownNow(); }
 }

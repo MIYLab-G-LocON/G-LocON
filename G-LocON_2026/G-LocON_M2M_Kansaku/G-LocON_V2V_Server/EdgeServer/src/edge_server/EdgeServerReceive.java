@@ -50,8 +50,10 @@ public class EdgeServerReceive extends Thread {
 
                 } else if (processType.equals(LEAVE)) {
                     UserInfo user = pjo.getUserInfo();
+                    int before = registry.size();
                     registry.leave(user);
-                    logGroup();
+                    System.out.printf("[LEAVE] ES=%-22s peer=%-8s members: %d→%d%n",
+                            intersectionId, user.getPeerId(), before, registry.size());
 
                 } else if (processType.equals(SEARCH)) {
                     UserInfo user = pjo.getUserInfo();
@@ -72,46 +74,30 @@ public class EdgeServerReceive extends Thread {
      *   3. 新規車両へ既存メンバー一覧をREPLY_RESULTで返送
      */
     private void onJoin(UserInfo user) {
-        // JOIN前の既存メンバー（NATホールパンチング対象）
         ArrayList<UserInfo> existingMembers = registry.getMembers(user);
+        int before = existingMembers.size();
 
         registry.join(user);
-        logJoin(user);
-        logGroup();
+        System.out.printf("[JOIN ] ES=%-22s peer=%-8s eta=%.1fs  members: %d→%d%n",
+                intersectionId, user.getPeerId(), user.getEta(), before, registry.size());
 
         // NAT_REGISTER: 既存メンバー全員へ新規車両の情報を通知
-        EdgeServerSend natNotify = new EdgeServerSend(
-                socket, user, existingMembers, EdgeServerSend.Mode.NAT_REGISTER);
-        natNotify.start();
+        if (!existingMembers.isEmpty()) {
+            new EdgeServerSend(socket, user, existingMembers, EdgeServerSend.Mode.NAT_REGISTER).start();
+            System.out.printf("[NAT ] ES=%-22s notify %d peers about %s%n",
+                    intersectionId, existingMembers.size(), user.getPeerId());
+        }
 
         // REPLY_RESULT: 新規車両へ既存メンバー一覧を返送
-        EdgeServerSend reply = new EdgeServerSend(
-                socket, user, existingMembers, EdgeServerSend.Mode.REPLY_RESULT);
-        reply.start();
+        new EdgeServerSend(socket, user, existingMembers, EdgeServerSend.Mode.REPLY_RESULT).start();
+        System.out.printf("[SEND ] ES=%-22s → %-8s members=%d%n",
+                intersectionId, user.getPeerId(), existingMembers.size());
     }
 
-    /** SEARCH処理: メンバー一覧を要求元へ返送（JOIN後の再取得など） */
     private void onSearch(UserInfo user) {
         ArrayList<UserInfo> members = registry.getMembers(user);
-        EdgeServerSend reply = new EdgeServerSend(
-                socket, user, members, EdgeServerSend.Mode.REPLY_RESULT);
-        reply.start();
-        System.out.println("SEARCH: " + user.getPeerId()
-                + " へメンバー一覧 " + members.size() + "件 を返送");
-    }
-
-    // ---- ログ出力 ----
-
-    private void logJoin(UserInfo user) {
-        // join_log.csv 用: intersectionId, peerId, t_join_acked, eta_at_join
-        System.out.printf("[join_log] intersectionId=%s peerId=%s t=%d eta=%.1fs%n",
-                intersectionId, user.getPeerId(),
-                System.currentTimeMillis(), user.getEta());
-    }
-
-    private void logGroup() {
-        // group_log.csv 用: intersectionId, timestamp, member_count
-        System.out.printf("[group_log] intersectionId=%s t=%d member_count=%d%n",
-                intersectionId, System.currentTimeMillis(), registry.size());
+        new EdgeServerSend(socket, user, members, EdgeServerSend.Mode.REPLY_RESULT).start();
+        System.out.printf("[SRCH ] ES=%-22s → %-8s members=%d%n",
+                intersectionId, user.getPeerId(), members.size());
     }
 }
