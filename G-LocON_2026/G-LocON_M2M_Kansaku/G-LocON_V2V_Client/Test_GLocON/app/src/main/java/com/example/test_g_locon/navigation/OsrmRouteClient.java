@@ -87,8 +87,8 @@ public class OsrmRouteClient {
                             .getJSONArray("location");
                     double lng = loc.getDouble(0);
                     double lat = loc.getDouble(1);
-                    // intersectionId は "緯度4桁_経度4桁" 形式（MasterServerのCSVと合わせる）
-                    String id = String.format("%.4f_%.4f", lat, lng);
+                    // intersectionId は "緯度5桁_経度5桁" 形式（精度±1m、衝突回避）
+                    String id = String.format("%.5f_%.5f", lat, lng);
                     intersections.add(new Intersection(id, lat, lng));
                 }
             }
