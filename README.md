@@ -17,7 +17,8 @@ G-LocON/
 ├── G-LocON_2025/
 │   └── ...
 └── G-LocON_2024/
-    └── ...
+    ├── G-LocON_Client_2024/     G-LocON基盤クライアント（改修前・技術セミナー版）
+    └── G-LocON_Server_2024/     G-LocON基盤サーバ（改修前・技術セミナー版）
 ```
 
 ---
@@ -74,7 +75,14 @@ G-LocON_[学位][学年][教授イニシャル]_[氏名]/
 | `G-LocON_Server_2026` | 同上（サーバ側） |
 | `G-LocON_M2M_Kansaku` | G-LocONをV2V（車車間通信）に応用．交差点中心のETAベースP2Pグループ形成を実現 |
 
-### 2025年以前
+### 2024年
+
+| フォルダ | 内容 |
+|---------|------|
+| `G-LocON_Client_2024` | 技術セミナーで作成された初期版クライアント（Google Maps SDK使用，2026年改修前のベースコード） |
+| `G-LocON_Server_2024` | 同上（サーバ側，SignalingServer/STUNServer/VirtualClient構成） |
+
+### 2025年
 
 順次追加予定．
 
