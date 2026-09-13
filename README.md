@@ -94,5 +94,3 @@ G-LocON_[学位][学年][教授イニシャル]_[氏名]/
 
 - [G-LocON_2026/README.md](G-LocON_2026/README.md)
 - [G-LocON_2024/README.md](G-LocON_2024/README.md)
-- [G-LocON_2024/G-LocON_Client_2024/README.md](G-LocON_2024/G-LocON_Client_2024/README.md)
-- [G-LocON_2024/G-LocON_Server_2024/README.md](G-LocON_2024/G-LocON_Server_2024/README.md)
