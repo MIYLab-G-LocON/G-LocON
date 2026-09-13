@@ -93,3 +93,6 @@ G-LocON_[学位][学年][教授イニシャル]_[氏名]/
 詳細な設計・実装・評価方針は各フォルダ内のREADMEを参照すること．
 
 - [G-LocON_2026/README.md](G-LocON_2026/README.md)
+- [G-LocON_2024/README.md](G-LocON_2024/README.md)
+- [G-LocON_2024/G-LocON_Client_2024/README.md](G-LocON_2024/G-LocON_Client_2024/README.md)
+- [G-LocON_2024/G-LocON_Server_2024/README.md](G-LocON_2024/G-LocON_Server_2024/README.md)
