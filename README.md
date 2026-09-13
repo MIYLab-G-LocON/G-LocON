@@ -17,8 +17,8 @@ G-LocON/
 ├── G-LocON_2025/
 │   └── ...
 └── G-LocON_2024/
-    ├── G-LocON_Client_2024/     G-LocON基盤クライアント（改修前・技術セミナー版）
-    └── G-LocON_Server_2024/     G-LocON基盤サーバ（改修前・技術セミナー版）
+    ├── G-LocON_Client_2024/     G-LocON基盤クライアント（改修前・TechnicalSeminar版）
+    └── G-LocON_Server_2024/     G-LocON基盤サーバ（改修前・TechnicalSeminar版）
 ```
 
 ---
@@ -79,7 +79,7 @@ G-LocON_[学位][学年][教授イニシャル]_[氏名]/
 
 | フォルダ | 内容 |
 |---------|------|
-| `G-LocON_Client_2024` | 技術セミナーで作成された初期版クライアント（Google Maps SDK使用，2026年改修前のベースコード） |
+| `G-LocON_Client_2024` | TechnicalSeminarで作成された初期版クライアント（Google Maps SDK使用，2026年改修前のベースコード） |
 | `G-LocON_Server_2024` | 同上（サーバ側，SignalingServer/STUNServer/VirtualClient構成） |
 
 ### 2025年
