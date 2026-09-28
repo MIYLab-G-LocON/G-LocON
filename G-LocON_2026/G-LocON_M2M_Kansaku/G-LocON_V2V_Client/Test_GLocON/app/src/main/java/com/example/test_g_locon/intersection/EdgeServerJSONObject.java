@@ -45,6 +45,21 @@ public class EdgeServerJSONObject {
      * @param userInfo      自車のユーザ情報
      * @param intersectionId 離脱する交差点のID
      */
+    /**
+     * KEEPALIVE用JSONを生成する（NATマッピング維持用。EdgeServerは応答しない）。
+     */
+    public JSONObject buildKeepAlive(UserInfo userInfo, String intersectionId) {
+        JSONObject json = new JSONObject();
+        try {
+            json.put("processType",    "KEEPALIVE");
+            json.put("intersectionId", intersectionId);
+            json.put("peerID",         userInfo.getPeerId());
+        } catch (JSONException e) {
+            e.printStackTrace();
+        }
+        return json;
+    }
+
     public JSONObject buildLeave(UserInfo userInfo, String intersectionId) {
         JSONObject json = new JSONObject();
         try {

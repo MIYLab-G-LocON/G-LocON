@@ -10,7 +10,7 @@ import java.net.DatagramSocket;
 import java.net.InetAddress;
 
 /**
- * STUNサーバへ最初に "Hello" を送り、その後60秒ごとに "Ping" を送り続けるクラス。
+ * STUNサーバへ最初に "Hello" を送り、その後20秒ごとに "Ping" を送り続けるクラス。
  *
  * [変更] extends AsyncTask → implements Runnable
  *   - doInBackground() の内容を run() に移動
@@ -19,7 +19,8 @@ import java.net.InetAddress;
 public class STUNServerClientSender implements Runnable {
 
     private static final String TAG = "STUNSender";
-    private static final long PING_INTERVAL_MS = 60_000L; // 60秒ごとにPing
+    // [NAT対応] 60秒→20秒。携帯キャリアのNATはUDPマッピングを数十秒で破棄することがあるため
+    private static final long PING_INTERVAL_MS = 20_000L; // 20秒ごとにPing
 
     private final DatagramSocket socket;
     private final ISTUNServerClientSender callback;
@@ -31,7 +32,7 @@ public class STUNServerClientSender implements Runnable {
 
     /**
      * [変更] doInBackground() → run()
-     * "Hello" 送信後に Receiver を起動し、以降は "Ping" を60秒ごとに送り続ける。
+     * "Hello" 送信後に Receiver を起動し、以降は "Ping" を20秒ごとに送り続ける。
      */
     @Override
     public void run() {

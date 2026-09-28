@@ -11,8 +11,12 @@ import org.json.JSONObject;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * EdgeServerへJOIN/LEAVEをUDP送信するクライアント。
@@ -23,6 +27,10 @@ import java.util.concurrent.Executors;
  * [NAT対応] JOIN/LEAVE は STUN・シグナリングと同じ共有ソケットから送信する。
  * EdgeServer は返信（メンバー一覧・NAT_REGISTER通知）を共有ソケットのアドレスへ送るため，
  * 使い捨てソケットから送ると NAT 環境では共有ソケット側にマッピングが無く返信が破棄される。
+ *
+ * [NAT対応] JOIN中の交差点には KEEPALIVE_INTERVAL_SEC 秒ごとに KEEPALIVE を送り，
+ * NATのマッピング（EdgeServer→端末の経路）がタイムアウトで閉じないようにする。
+ * 後から別車両がJOINした際の NAT_REGISTER（doUDPHolePunching）通知を確実に受け取るため。
  */
 public class EdgeServerClient {
 
@@ -33,6 +41,11 @@ public class EdgeServerClient {
     }
 
     private final ExecutorService executor = Executors.newCachedThreadPool();
+    /** 携帯キャリアのNATはUDPマッピングを数十秒で破棄することがあるため，それより短い間隔にする */
+    private static final long KEEPALIVE_INTERVAL_SEC = 15;
+    private final ScheduledExecutorService keepAliveScheduler = Executors.newSingleThreadScheduledExecutor();
+    /** JOIN中の交差点（intersectionId → Intersection） */
+    private final Map<String, Intersection> joined = new ConcurrentHashMap<>();
     private final UserInfo myUserInfo;
     /** STUN・シグナリング・P2Pと共有するソケット（受信は P2PReceiver が担当） */
     private final DatagramSocket socket;
@@ -47,6 +60,25 @@ public class EdgeServerClient {
         p2pLog = new OutputToCSV(context, "p2p_log.csv");
         p2pLog.OutputFieledName(
                 "intersectionId", "t_join_sent_ms", "eta_at_join_sec", "edgeServerIp", "edgeServerPort");
+        keepAliveScheduler.scheduleAtFixedRate(this::sendKeepAlives,
+                KEEPALIVE_INTERVAL_SEC, KEEPALIVE_INTERVAL_SEC, TimeUnit.SECONDS);
+    }
+
+    /** JOIN中の全交差点のEdgeServerへKEEPALIVEを送る */
+    private void sendKeepAlives() {
+        for (Intersection intersection : joined.values()) {
+            try {
+                JSONObject json = new EdgeServerJSONObject().buildKeepAlive(
+                        myUserInfo, intersection.getIntersectionId());
+                byte[] data = json.toString().getBytes();
+                socket.send(new DatagramPacket(
+                        data, data.length,
+                        InetAddress.getByName(intersection.getEdgeServerIp()),
+                        intersection.getEdgeServerPort()));
+            } catch (Exception e) {
+                System.err.println("EdgeServerClient KEEPALIVE エラー: " + e.getMessage());
+            }
+        }
     }
 
     public void setCallback(IEdgeServerCallback callback) {
@@ -64,6 +96,8 @@ public class EdgeServerClient {
     }
 
     public void shutdown() {
+        keepAliveScheduler.shutdownNow();
+        joined.clear();
         executor.shutdown();
         p2pLog.fileClose();
     }
@@ -92,6 +126,7 @@ public class EdgeServerClient {
                 );
                 socket.send(packet);
                 long tSent = System.currentTimeMillis();
+                joined.put(intersection.getIntersectionId(), intersection);
 
                 System.out.println("JOIN送信: intersectionId=" + intersection.getIntersectionId()
                         + " eta=" + intersection.getEtaSec() + "s");
@@ -134,6 +169,7 @@ public class EdgeServerClient {
                         intersection.getEdgeServerPort()
                 );
                 socket.send(packet);
+                joined.remove(intersection.getIntersectionId());
 
                 System.out.println("LEAVE送信: intersectionId=" + intersection.getIntersectionId());
 

@@ -140,6 +140,7 @@ G-LocON_2026/
 | JOIN | Client | EdgeServer | 交差点V2Vグループへの参加要求（intersectionId, eta含む） |
 | LEAVE | Client | EdgeServer | 交差点V2Vグループからの離脱通知 |
 | SEARCH | Client | EdgeServer | グループメンバー一覧の問い合わせ |
+| KEEPALIVE | Client | EdgeServer | JOIN中に15秒ごと送信するNATマッピング維持用パケット（応答なし） |
 | getPeripheralUserInfoList | EdgeServer | Client | グループメンバー一覧を返送 |
 | doUDPHolePunching | EdgeServer | Client（他車両） | NATホールパンチング通知 |
 | NATRegisterDstAddrPort | Client | 他車両 | NATに穴を開けるパケット |

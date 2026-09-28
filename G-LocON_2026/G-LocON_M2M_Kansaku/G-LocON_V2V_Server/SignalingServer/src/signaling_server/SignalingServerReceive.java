@@ -51,24 +51,29 @@ public class SignalingServerReceive extends Thread {
                 ProcessJSONObject pjo = new ProcessJSONObject(jsonObject);
                 String processType = pjo.getProcessType();
 
+                // [NAT対応] 返信先はクライアント申告のpublicIP/Portではなく実際の送信元アドレスを使う
+                // （NATの無いLAN内では送信元＝申告値のため動作は変わらない）
+                String srcIP   = receivePacket.getAddress().getHostAddress();
+                int    srcPort = receivePacket.getPort();
+
                 if (processType.equals(REGISTER)) {
-                    UserInfo user = pjo.getUserInfo();
+                    UserInfo user = withObservedAddress(pjo.getUserInfo(), srcIP, srcPort);
                     userRegistry.register(user);
                     showInfo(user, REGISTER);
 
                 } else if (processType.equals(UPDATE)) {
-                    UserInfo user = pjo.getUserInfo();
+                    UserInfo user = withObservedAddress(pjo.getUserInfo(), srcIP, srcPort);
                     userRegistry.update(user);
                     showInfo(user, UPDATE);
 
                 } else if (processType.equals(SEARCH)) {
-                    UserInfo searcher = pjo.getUserInfo();
+                    UserInfo searcher = withObservedAddress(pjo.getUserInfo(), srcIP, srcPort);
                     double distance = pjo.getSearchDistance();
                     System.out.println(searcher.getPeerId() + " からの SEARCH 要求: 半径=" + distance + "m");
                     onSearch(searcher, distance);
 
                 } else if (processType.equals(DELETE)) {
-                    UserInfo user = pjo.getUserInfo();
+                    UserInfo user = withObservedAddress(pjo.getUserInfo(), srcIP, srcPort);
                     userRegistry.delete(user);
                 }
 
@@ -101,6 +106,15 @@ public class SignalingServerReceive extends Thread {
                 socket, searcher, searchResults, SignalingServerSend.Mode.REPLY_RESULT);
         reply.start();
         System.out.println(searcher.getPeerId() + ": REPLY_RESULT スレッド起動");
+    }
+
+    /** 申告された publicIP/Port と実際の送信元が異なる場合（NAT配下）は送信元で上書きする */
+    private UserInfo withObservedAddress(UserInfo user, String srcIP, int srcPort) {
+        if (!srcIP.equals(user.getPublicIP()) || srcPort != user.getPublicPort()) {
+            user.setPublicIP(srcIP);
+            user.setPublicPort(srcPort);
+        }
+        return user;
     }
 
     /** デバッグ用ユーザ情報表示 */

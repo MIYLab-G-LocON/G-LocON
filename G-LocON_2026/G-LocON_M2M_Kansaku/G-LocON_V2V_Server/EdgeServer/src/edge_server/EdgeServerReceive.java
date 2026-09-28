@@ -13,6 +13,7 @@ import org.json.JSONObject;
  *   JOIN   - 車両がグループへ参加。既存メンバーとNATホールパンチングを開始。
  *   LEAVE  - 車両がグループから離脱。
  *   SEARCH - 車両が現在のメンバー一覧を取得（JOIN後の再取得など）。
+ *   KEEPALIVE - NATのマッピング維持用。受信のみで応答しない。
  *
  * ログ出力項目（join_log, group_log）はここで行う。
  */
@@ -21,6 +22,7 @@ public class EdgeServerReceive extends Thread {
     private static final String JOIN   = "JOIN";
     private static final String LEAVE  = "LEAVE";
     private static final String SEARCH = "SEARCH";
+    private static final String KEEPALIVE = "KEEPALIVE";
 
     private final DatagramSocket socket;
     private final V2VGroupRegistry registry;
@@ -50,7 +52,10 @@ public class EdgeServerReceive extends Thread {
                 String srcIP   = receivePacket.getAddress().getHostAddress();
                 int    srcPort = receivePacket.getPort();
 
-                if (processType.equals(JOIN)) {
+                if (processType.equals(KEEPALIVE)) {
+                    continue; // NATマッピング維持のためのパケット。処理不要
+
+                } else if (processType.equals(JOIN)) {
                     UserInfo user = withObservedAddress(pjo.getUserInfo(), srcIP, srcPort);
                     onJoin(user);
 
