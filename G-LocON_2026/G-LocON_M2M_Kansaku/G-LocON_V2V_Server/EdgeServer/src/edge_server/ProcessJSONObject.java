@@ -107,4 +107,21 @@ public class ProcessJSONObject {
         }
         return json;
     }
+
+    /** LEAVEした車両の情報（残りのメンバーへの離脱通知用） */
+    public JSONObject getLeftUserInfo(UserInfo userInfo, String intersectionId) {
+        JSONObject json = new JSONObject();
+        try {
+            json.put("processType", "peerLeft");
+            json.put("intersectionId", intersectionId);
+            json.put("publicIP",    userInfo.getPublicIP());
+            json.put("publicPort",  userInfo.getPublicPort());
+            json.put("privateIP",   userInfo.getPrivateIP());
+            json.put("privatePort", userInfo.getPrivatePort());
+            json.put("peerID",      userInfo.getPeerId());
+        } catch (JSONException e) {
+            e.printStackTrace();
+        }
+        return json;
+    }
 }

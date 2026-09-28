@@ -155,6 +155,25 @@ public class P2P implements IP2PReceiver {
         iP2P.onGetPeripheralUsersInfo(peripheralUsers);
     }
 
+    /**
+     * 同じ交差点グループの他の車両が離脱したとき（EdgeServerからのpeerLeft通知）に呼ばれる。
+     * そのグループのメンバーから外し，送信先リストを作り直す。
+     * 別の交差点グループでまだ一緒の車両であれば，和集合に残るため送信は続く。
+     */
+    @Override
+    public void onPeerLeftGroup(String intersectionId, UserInfo leftUser) {
+        ArrayList<UserInfo> members = groupMembers.get(intersectionId);
+        if (members == null) return;
+        ArrayList<UserInfo> updated = new ArrayList<>();
+        for (UserInfo m : members) {
+            if (!isSameUser(m, leftUser)) updated.add(m);
+        }
+        if (updated.size() == members.size()) return; // 該当なし
+        groupMembers.put(intersectionId, updated);
+        rebuildPeripheralUsers();
+        iP2P.onGetPeripheralUsersInfo(peripheralUsers);
+    }
+
     /** 交差点グループから離脱したときに呼ぶ（そのグループのメンバーを送信先から外す） */
     public void removeGroup(String intersectionId) {
         if (groupMembers.remove(intersectionId) != null) {

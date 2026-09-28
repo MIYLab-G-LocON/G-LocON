@@ -11,7 +11,7 @@ import org.json.JSONObject;
  *
  * 受信する processType:
  *   JOIN   - 車両がグループへ参加。既存メンバーとNATホールパンチングを開始。
- *   LEAVE  - 車両がグループから離脱。
+ *   LEAVE  - 車両がグループから離脱。残りのメンバーへ peerLeft で通知。
  *   SEARCH - 車両が現在のメンバー一覧を取得（JOIN後の再取得など）。
  *   KEEPALIVE - NATのマッピング維持用。受信のみで応答しない。
  *
@@ -61,10 +61,7 @@ public class EdgeServerReceive extends Thread {
 
                 } else if (processType.equals(LEAVE)) {
                     UserInfo user = withObservedAddress(pjo.getUserInfo(), srcIP, srcPort);
-                    int before = registry.size();
-                    registry.leave(user);
-                    System.out.printf("[LEAVE] ES=%-22s peer=%-8s members: %d→%d%n",
-                            intersectionId, user.getPeerId(), before, registry.size());
+                    onLeave(user);
 
                 } else if (processType.equals(SEARCH)) {
                     UserInfo user = withObservedAddress(pjo.getUserInfo(), srcIP, srcPort);
@@ -103,6 +100,28 @@ public class EdgeServerReceive extends Thread {
         new EdgeServerSend(socket, user, existingMembers, EdgeServerSend.Mode.REPLY_RESULT, intersectionId).start();
         System.out.printf("[SEND ] ES=%-22s → %-8s members=%d%n",
                 intersectionId, user.getPeerId(), existingMembers.size());
+    }
+
+    /**
+     * LEAVE処理:
+     *   1. グループから削除
+     *   2. 残りのメンバー全員へ離脱した車両の情報をPEER_LEFTで通知
+     *      （通知しないと，残りの車両の送信先リストに抜けた車両が残り続ける）
+     */
+    private void onLeave(UserInfo user) {
+        int before = registry.size();
+        boolean removed = registry.leave(user);
+        System.out.printf("[LEAVE] ES=%-22s peer=%-8s members: %d→%d%n",
+                intersectionId, user.getPeerId(), before, registry.size());
+
+        if (!removed) return; // 未参加の車両のLEAVE（重複送信など）は通知不要
+
+        ArrayList<UserInfo> remaining = registry.getMembers(user);
+        if (!remaining.isEmpty()) {
+            new EdgeServerSend(socket, user, remaining, EdgeServerSend.Mode.PEER_LEFT, intersectionId).start();
+            System.out.printf("[LEFT ] ES=%-22s notify %d peers that %s left%n",
+                    intersectionId, remaining.size(), user.getPeerId());
+        }
     }
 
     /** 申告された publicIP/Port と実際の送信元が異なる場合（NAT配下）は送信元で上書きする */

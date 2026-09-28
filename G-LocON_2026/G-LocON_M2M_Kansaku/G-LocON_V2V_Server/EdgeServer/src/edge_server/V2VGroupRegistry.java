@@ -39,12 +39,14 @@ public class V2VGroupRegistry {
                 + " メンバー数=" + memberList.size());
     }
 
-    public void leave(UserInfo userInfo) {
+    /** @return 実際にメンバーから削除した場合 true */
+    public boolean leave(UserInfo userInfo) {
         boolean removed = memberList.removeIf(existing -> isSameUser(existing, userInfo));
         System.out.println("LEAVE: " + (removed ? "成功" : "対象なし")
                 + " intersectionId=" + intersectionId
                 + " peerId=" + userInfo.getPeerId()
                 + " メンバー数=" + memberList.size());
+        return removed;
     }
 
     /** グループの全メンバーを返す（スナップショット）。自分自身は除外。 */

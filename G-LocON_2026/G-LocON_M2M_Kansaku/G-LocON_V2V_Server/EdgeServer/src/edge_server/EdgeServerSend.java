@@ -12,10 +12,11 @@ import org.json.JSONObject;
  *
  * NAT_REGISTER : JOINしてきた車両の情報を既存メンバー全員へ通知
  * REPLY_RESULT : JOINしてきた車両へ既存メンバー一覧を返送
+ * PEER_LEFT    : LEAVEした車両の情報を残りのメンバー全員へ通知
  */
 public class EdgeServerSend extends Thread {
 
-    public enum Mode { NAT_REGISTER, REPLY_RESULT }
+    public enum Mode { NAT_REGISTER, REPLY_RESULT, PEER_LEFT }
 
     private final DatagramSocket socket;
     private final UserInfo srcUser;
@@ -37,6 +38,7 @@ public class EdgeServerSend extends Thread {
         switch (mode) {
             case NAT_REGISTER: sendNatRegister(); break;
             case REPLY_RESULT: sendReplyResult(); break;
+            case PEER_LEFT:    sendPeerLeft();    break;
         }
     }
 
@@ -57,6 +59,27 @@ public class EdgeServerSend extends Thread {
             }
         } catch (Exception e) {
             System.err.println("NAT_REGISTER 送信エラー: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    /** 残りのメンバー全員に，LEAVEした車両の情報を送信して送信先リストから外させる */
+    private void sendPeerLeft() {
+        ProcessJSONObject pjo = new ProcessJSONObject();
+        JSONObject json = pjo.getLeftUserInfo(srcUser, intersectionId);
+        try {
+            byte[] data = json.toString().getBytes();
+            for (UserInfo peer : peerList) {
+                DatagramPacket packet = new DatagramPacket(
+                        data, data.length,
+                        InetAddress.getByName(peer.getPublicIP()), peer.getPublicPort()
+                );
+                socket.send(packet);
+                System.out.printf("[LEFT ] left=%s → remaining=%s%n",
+                        srcUser.getPeerId(), peer.getPeerId());
+            }
+        } catch (Exception e) {
+            System.err.println("PEER_LEFT 送信エラー: " + e.getMessage());
             e.printStackTrace();
         }
     }

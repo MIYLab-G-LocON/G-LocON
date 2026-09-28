@@ -26,6 +26,7 @@ public class P2PReceiver implements Runnable {
     private static final String GET_PERIPHERAL_USER  = "getPeripheralUserInfoList";
     private static final String DO_UDP_HOLE_PUNCHING = "doUDPHolePunching";
     private static final String SEND_DATA            = "SendLocation";
+    private static final String PEER_LEFT            = "peerLeft";
 
     private final DatagramSocket socket;
     private final IP2PReceiver iP2PReceiver;
@@ -75,6 +76,12 @@ public class P2PReceiver implements Runnable {
                         iP2PReceiver.onDoUDPHolePunchingInGroup(intersectionId, signalingJSONObject.getSrcUser());
                     } else {
                         iP2PReceiver.onDoUDPHolePunching(signalingJSONObject.getSrcUser());
+                    }
+
+                } else if (processType.equals(PEER_LEFT)) {
+                    Log.d(TAG, "processType: PEER_LEFT intersectionId=" + intersectionId);
+                    if (intersectionId != null) {
+                        iP2PReceiver.onPeerLeftGroup(intersectionId, signalingJSONObject.getSrcUser());
                     }
 
                 } else if (processType.equals(SEND_DATA)) {

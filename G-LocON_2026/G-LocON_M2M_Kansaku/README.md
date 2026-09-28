@@ -92,7 +92,7 @@ G-LocON_2026/
 |--------|------|
 | `StartUp.java` | 起動引数で交差点ID・ポート番号を受取りEdgeServerReceiveを起動 |
 | `EdgeServerReceive.java` | JOIN/LEAVE/SEARCHの3種UDPを受信し処理を振り分け |
-| `EdgeServerSend.java` | グループメンバー一覧の返送・NATホールパンチング通知（NAT_REGISTER/REPLY_RESULT） |
+| `EdgeServerSend.java` | グループメンバー一覧の返送・NATホールパンチング通知・離脱通知（NAT_REGISTER/REPLY_RESULT/PEER_LEFT） |
 | `V2VGroupRegistry.java` | CopyOnWriteArrayListでグループメンバーをスレッドセーフに管理 |
 | `UserInfo.java` | publicIP/Port, privateIP/Port, lat, lng, peerId, **eta**（追加） |
 | `ProcessJSONObject.java` | JOIN/LEAVE/SEARCHのJSON解析・グループメンバー一覧のJSON生成 |
@@ -143,6 +143,7 @@ G-LocON_2026/
 | KEEPALIVE | Client | EdgeServer | JOIN中に15秒ごと送信するNATマッピング維持用パケット（応答なし） |
 | getPeripheralUserInfoList | EdgeServer | Client | グループメンバー一覧を返送 |
 | doUDPHolePunching | EdgeServer | Client（他車両） | NATホールパンチング通知 |
+| peerLeft | EdgeServer | Client（残りの車両） | 他の車両がLEAVEしたことの通知．受け取った車両はその交差点グループのメンバーから外す |
 | NATRegisterDstAddrPort | Client | 他車両 | NATに穴を開けるパケット |
 | SendLocation | Client | 他車両 | P2P直接通信（位置情報送信） |
 | CARLA_LOCATION | CARLABridge | Client | CARLA車両の位置・速度・進行方向（未実装） |

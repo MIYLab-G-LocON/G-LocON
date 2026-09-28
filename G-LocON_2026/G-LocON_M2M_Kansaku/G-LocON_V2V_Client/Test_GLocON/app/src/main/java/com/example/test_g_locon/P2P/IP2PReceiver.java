@@ -11,6 +11,7 @@ public interface IP2PReceiver {
     void onDoUDPHolePunching(UserInfo srcUser);//自身を検索したユーザ情報をNATに登録時
     void onGetGroupMembers(String intersectionId, ArrayList<UserInfo> members); //EdgeServerから交差点グループのメンバー一覧を取得時
     void onDoUDPHolePunchingInGroup(String intersectionId, UserInfo srcUser); //交差点グループに新規車両が参加した時
+    void onPeerLeftGroup(String intersectionId, UserInfo leftUser); //交差点グループから他の車両が離脱した時
     void onGetPeripheralUserLocation(int locationUpdateCount, String srcIP, int srcPort, Location location, String peerId, double speed);//ピアからデータを取得時
     void onGetAck(int locationCount, String endPointIP, int endPointPort);//ACKの送信時
 }
