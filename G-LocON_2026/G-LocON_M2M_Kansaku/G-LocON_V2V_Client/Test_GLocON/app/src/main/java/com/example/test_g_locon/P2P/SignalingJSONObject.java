@@ -35,6 +35,11 @@ public class SignalingJSONObject {
         return processType;
     }
 
+    /** EdgeServerからの応答に含まれる交差点ID（SignalingServerからの応答には無いため null） */
+    public String getIntersectionId(){
+        return jsonObject.has("intersectionId") ? jsonObject.optString("intersectionId", null) : null;
+    }
+
     public ArrayList<UserInfo> getPerioheralUsers(){
         ArrayList<UserInfo> peripheralUsers = new ArrayList<>();
         JSONArray getArray = null;

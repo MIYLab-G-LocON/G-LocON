@@ -94,13 +94,13 @@ public class EdgeServerReceive extends Thread {
 
         // NAT_REGISTER: 既存メンバー全員へ新規車両の情報を通知
         if (!existingMembers.isEmpty()) {
-            new EdgeServerSend(socket, user, existingMembers, EdgeServerSend.Mode.NAT_REGISTER).start();
+            new EdgeServerSend(socket, user, existingMembers, EdgeServerSend.Mode.NAT_REGISTER, intersectionId).start();
             System.out.printf("[NAT ] ES=%-22s notify %d peers about %s%n",
                     intersectionId, existingMembers.size(), user.getPeerId());
         }
 
         // REPLY_RESULT: 新規車両へ既存メンバー一覧を返送
-        new EdgeServerSend(socket, user, existingMembers, EdgeServerSend.Mode.REPLY_RESULT).start();
+        new EdgeServerSend(socket, user, existingMembers, EdgeServerSend.Mode.REPLY_RESULT, intersectionId).start();
         System.out.printf("[SEND ] ES=%-22s → %-8s members=%d%n",
                 intersectionId, user.getPeerId(), existingMembers.size());
     }
@@ -118,7 +118,7 @@ public class EdgeServerReceive extends Thread {
 
     private void onSearch(UserInfo user) {
         ArrayList<UserInfo> members = registry.getMembers(user);
-        new EdgeServerSend(socket, user, members, EdgeServerSend.Mode.REPLY_RESULT).start();
+        new EdgeServerSend(socket, user, members, EdgeServerSend.Mode.REPLY_RESULT, intersectionId).start();
         System.out.printf("[SRCH ] ES=%-22s → %-8s members=%d%n",
                 intersectionId, user.getPeerId(), members.size());
     }

@@ -115,6 +115,13 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
     private static final long SEARCH_INITIAL_DELAY_SEC = 3;
     /** 定期 SEARCH の実行間隔 (秒) */
     private static final long SEARCH_INTERVAL_SEC = 5;
+    /**
+     * [V2V] SignalingServerへの距離ベース SEARCH を行うか。
+     * V2Vでは周辺車両をEdgeServerの交差点グループで決めるため false。
+     * true にすると SignalingServer の検索結果（距離ベース）も受信するが，
+     * 交差点グループの一覧とは別扱い（上書きしない）になる。
+     */
+    private static final boolean USE_SIGNALING_SEARCH = false;
 
     // ---- V2V拡張フィールド ----
 //    private static final String MASTER_SERVER_IP   = "172.20.10.4"; // テザリング
@@ -210,6 +217,8 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
             }
             @Override
             public void onLeaveSent(Intersection intersection) {
+                // 離脱した交差点グループのメンバーを位置情報の送信先から外す
+                p2p.removeGroup(intersection.getIntersectionId());
                 callback.onIntersectionLeft(intersection);
             }
         });
@@ -238,7 +247,7 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
         searchScheduler = Executors.newSingleThreadScheduledExecutor();
         searchScheduler.scheduleAtFixedRate(
                 () -> {
-                    if (natTravel == NAT_TRAVEL_OK && p2p != null) {
+                    if (USE_SIGNALING_SEARCH && natTravel == NAT_TRAVEL_OK && p2p != null) {
                         p2p.signalingSearch(searchRange);
                     }
                 },
@@ -325,7 +334,7 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
             if (geoUpdateCount == USER_INFO_UPDATE_INTERVAL) {
                 geoUpdateCount = 0;
                 p2p.signalingUpdate();
-                p2p.signalingSearch(searchRange);
+                if (USE_SIGNALING_SEARCH) p2p.signalingSearch(searchRange);
                 p2p.sendLocation(totalGeoUpdateCount);
             } else {
                 p2p.sendLocation(totalGeoUpdateCount);

@@ -59,7 +59,7 @@ public class ProcessJSONObject {
     }
 
     /** メンバー一覧をJSONに変換して返す（REPLY_RESULT用） */
-    public JSONObject getUserInfoList(ArrayList<UserInfo> members) {
+    public JSONObject getUserInfoList(ArrayList<UserInfo> members, String intersectionId) {
         JSONObject json = new JSONObject();
         JSONArray userList = new JSONArray();
         for (UserInfo m : members) {
@@ -80,6 +80,7 @@ public class ProcessJSONObject {
         }
         try {
             json.put("processType", "getPeripheralUserInfoList");
+            json.put("intersectionId", intersectionId); // どの交差点グループの一覧かをクライアントが区別するため
             json.put("userList", userList);
         } catch (JSONException e) {
             e.printStackTrace();
@@ -88,10 +89,11 @@ public class ProcessJSONObject {
     }
 
     /** NATホールパンチング通知用JSON（NAT_REGISTER用） */
-    public JSONObject getSrcUserInfo(UserInfo userInfo) {
+    public JSONObject getSrcUserInfo(UserInfo userInfo, String intersectionId) {
         JSONObject json = new JSONObject();
         try {
             json.put("processType", "doUDPHolePunching");
+            json.put("intersectionId", intersectionId);
             json.put("publicIP",    userInfo.getPublicIP());
             json.put("publicPort",  userInfo.getPublicPort());
             json.put("privateIP",   userInfo.getPrivateIP());

@@ -14,6 +14,8 @@ import java.net.DatagramSocket;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -33,7 +35,13 @@ public class P2P implements IP2PReceiver {
     private final IP2P iP2P;
     private final DatagramSocket socket;
     private UserInfo myUserInfo;
-    private ArrayList<UserInfo> peripheralUsers;
+    private volatile ArrayList<UserInfo> peripheralUsers;
+    /**
+     * [V2V] 交差点グループごとのメンバー一覧（intersectionId → メンバー）。
+     * 複数交差点に同時参加している場合も互いに上書きしないよう分けて保持し，
+     * peripheralUsers はその和集合（重複除去）として再計算する。
+     */
+    private final Map<String, ArrayList<UserInfo>> groupMembers = new ConcurrentHashMap<>();
 
     // [変更] AsyncTask → ExecutorService（キャッシュスレッドプール）
     // 複数の非同期通信タスクを並行実行するために使用する
@@ -118,6 +126,63 @@ public class P2P implements IP2PReceiver {
         peripheralUsers = newPeripheralUsers;
         iP2P.onGetPeripheralUsersInfo(peripheralUsers);
         natRegisterDstUsers();
+    }
+
+    // ---- [V2V] 交差点グループ単位の管理 ----
+
+    @Override
+    public void onGetGroupMembers(String intersectionId, ArrayList<UserInfo> members) {
+        groupMembers.put(intersectionId, members);
+        rebuildPeripheralUsers();
+        iP2P.onGetPeripheralUsersInfo(peripheralUsers);
+        // 新しく受け取ったメンバーに対してNATホールパンチングを行う
+        executor.execute(new P2PNatRegisterSender(
+                socket, myUserInfo.getPublicIP(), myUserInfo.getPublicPort(),
+                members, EP2PProcess.NATRegisterDstUsers));
+    }
+
+    @Override
+    public void onDoUDPHolePunchingInGroup(String intersectionId, UserInfo srcUserInfo) {
+        natRegisterSrcUser(srcUserInfo);
+        ArrayList<UserInfo> members = new ArrayList<>(
+                groupMembers.getOrDefault(intersectionId, new ArrayList<>()));
+        for (UserInfo m : members) {
+            if (isSameUser(m, srcUserInfo)) return;
+        }
+        members.add(srcUserInfo);
+        groupMembers.put(intersectionId, members);
+        rebuildPeripheralUsers();
+        iP2P.onGetPeripheralUsersInfo(peripheralUsers);
+    }
+
+    /** 交差点グループから離脱したときに呼ぶ（そのグループのメンバーを送信先から外す） */
+    public void removeGroup(String intersectionId) {
+        if (groupMembers.remove(intersectionId) != null) {
+            rebuildPeripheralUsers();
+            iP2P.onGetPeripheralUsersInfo(peripheralUsers);
+        }
+    }
+
+    /** 全グループのメンバーの和集合（同一端末は1件）を peripheralUsers として作り直す */
+    private void rebuildPeripheralUsers() {
+        ArrayList<UserInfo> merged = new ArrayList<>();
+        for (ArrayList<UserInfo> members : groupMembers.values()) {
+            for (UserInfo m : members) {
+                boolean exists = false;
+                for (UserInfo x : merged) {
+                    if (isSameUser(x, m)) { exists = true; break; }
+                }
+                if (!exists) merged.add(m);
+            }
+        }
+        peripheralUsers = merged;
+    }
+
+    private static boolean isSameUser(UserInfo a, UserInfo b) {
+        return a.getPublicIP().equals(b.getPublicIP())
+                && a.getPublicPort() == b.getPublicPort()
+                && a.getPrivateIP().equals(b.getPrivateIP())
+                && a.getPrivatePort() == b.getPrivatePort();
     }
 
     @Override

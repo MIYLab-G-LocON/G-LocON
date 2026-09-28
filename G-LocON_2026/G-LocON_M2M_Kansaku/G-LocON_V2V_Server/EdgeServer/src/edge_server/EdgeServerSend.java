@@ -21,13 +21,15 @@ public class EdgeServerSend extends Thread {
     private final UserInfo srcUser;
     private final ArrayList<UserInfo> peerList;
     private final Mode mode;
+    private final String intersectionId;
 
     public EdgeServerSend(DatagramSocket socket, UserInfo srcUser,
-                          ArrayList<UserInfo> peerList, Mode mode) {
+                          ArrayList<UserInfo> peerList, Mode mode, String intersectionId) {
         this.socket   = socket;
         this.srcUser  = srcUser;
         this.peerList = peerList;
         this.mode     = mode;
+        this.intersectionId = intersectionId;
     }
 
     @Override
@@ -41,7 +43,7 @@ public class EdgeServerSend extends Thread {
     /** 既存メンバー全員に，新規参加車両の情報を送信してNATホールパンチングを促す */
     private void sendNatRegister() {
         ProcessJSONObject pjo = new ProcessJSONObject();
-        JSONObject json = pjo.getSrcUserInfo(srcUser);
+        JSONObject json = pjo.getSrcUserInfo(srcUser, intersectionId);
         try {
             byte[] data = json.toString().getBytes();
             for (UserInfo peer : peerList) {
@@ -62,7 +64,7 @@ public class EdgeServerSend extends Thread {
     /** JOINしてきた車両へ既存メンバー一覧を返送 */
     private void sendReplyResult() {
         ProcessJSONObject pjo = new ProcessJSONObject();
-        JSONObject json = pjo.getUserInfoList(peerList);
+        JSONObject json = pjo.getUserInfoList(peerList, intersectionId);
         try {
             byte[] data = json.toString().getBytes();
             DatagramPacket packet = new DatagramPacket(

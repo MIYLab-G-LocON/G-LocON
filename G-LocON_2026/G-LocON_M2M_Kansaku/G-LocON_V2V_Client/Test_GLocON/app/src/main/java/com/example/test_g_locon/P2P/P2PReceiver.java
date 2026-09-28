@@ -58,13 +58,24 @@ public class P2PReceiver implements Runnable {
                 SignalingJSONObject signalingJSONObject = new SignalingJSONObject(jsonObject);
                 String processType = signalingJSONObject.getProcessType();
 
+                // EdgeServerからの応答には intersectionId が付く。交差点グループごとに管理する
+                String intersectionId = signalingJSONObject.getIntersectionId();
+
                 if (processType.equals(GET_PERIPHERAL_USER)) {
-                    Log.d(TAG, "processType: GET_PERIPHERAL_USER");
-                    iP2PReceiver.onGetPeripheralUser(signalingJSONObject.getPerioheralUsers());
+                    Log.d(TAG, "processType: GET_PERIPHERAL_USER intersectionId=" + intersectionId);
+                    if (intersectionId != null) {
+                        iP2PReceiver.onGetGroupMembers(intersectionId, signalingJSONObject.getPerioheralUsers());
+                    } else {
+                        iP2PReceiver.onGetPeripheralUser(signalingJSONObject.getPerioheralUsers());
+                    }
 
                 } else if (processType.equals(DO_UDP_HOLE_PUNCHING)) {
-                    Log.d(TAG, "processType: DO_UDP_HOLE_PUNCHING");
-                    iP2PReceiver.onDoUDPHolePunching(signalingJSONObject.getSrcUser());
+                    Log.d(TAG, "processType: DO_UDP_HOLE_PUNCHING intersectionId=" + intersectionId);
+                    if (intersectionId != null) {
+                        iP2PReceiver.onDoUDPHolePunchingInGroup(intersectionId, signalingJSONObject.getSrcUser());
+                    } else {
+                        iP2PReceiver.onDoUDPHolePunching(signalingJSONObject.getSrcUser());
+                    }
 
                 } else if (processType.equals(SEND_DATA)) {
                     P2PJSONObject p2pJSONObject = new P2PJSONObject(jsonObject);
