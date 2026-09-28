@@ -44,19 +44,25 @@ public class EdgeServerReceive extends Thread {
                 ProcessJSONObject pjo = new ProcessJSONObject(jsonObject);
                 String processType = pjo.getProcessType();
 
+                // [NAT対応] 返信先はクライアント申告のpublicIP/Portではなく，実際の送信元アドレスを使う。
+                // 端末がNAT配下でも，返信は端末が開けたマッピングを通って届く。
+                // （NATが無いLAN内では送信元＝申告値のため動作は変わらない）
+                String srcIP   = receivePacket.getAddress().getHostAddress();
+                int    srcPort = receivePacket.getPort();
+
                 if (processType.equals(JOIN)) {
-                    UserInfo user = pjo.getUserInfo();
+                    UserInfo user = withObservedAddress(pjo.getUserInfo(), srcIP, srcPort);
                     onJoin(user);
 
                 } else if (processType.equals(LEAVE)) {
-                    UserInfo user = pjo.getUserInfo();
+                    UserInfo user = withObservedAddress(pjo.getUserInfo(), srcIP, srcPort);
                     int before = registry.size();
                     registry.leave(user);
                     System.out.printf("[LEAVE] ES=%-22s peer=%-8s members: %d→%d%n",
                             intersectionId, user.getPeerId(), before, registry.size());
 
                 } else if (processType.equals(SEARCH)) {
-                    UserInfo user = pjo.getUserInfo();
+                    UserInfo user = withObservedAddress(pjo.getUserInfo(), srcIP, srcPort);
                     onSearch(user);
                 }
 
@@ -92,6 +98,17 @@ public class EdgeServerReceive extends Thread {
         new EdgeServerSend(socket, user, existingMembers, EdgeServerSend.Mode.REPLY_RESULT).start();
         System.out.printf("[SEND ] ES=%-22s → %-8s members=%d%n",
                 intersectionId, user.getPeerId(), existingMembers.size());
+    }
+
+    /** 申告された publicIP/Port と実際の送信元が異なる場合（NAT配下）は送信元で上書きする */
+    private UserInfo withObservedAddress(UserInfo user, String srcIP, int srcPort) {
+        if (!srcIP.equals(user.getPublicIP()) || srcPort != user.getPublicPort()) {
+            System.out.printf("[ADDR ] peer=%-8s 申告=%s:%d → 送信元=%s:%d%n",
+                    user.getPeerId(), user.getPublicIP(), user.getPublicPort(), srcIP, srcPort);
+            user.setPublicIP(srcIP);
+            user.setPublicPort(srcPort);
+        }
+        return user;
     }
 
     private void onSearch(UserInfo user) {

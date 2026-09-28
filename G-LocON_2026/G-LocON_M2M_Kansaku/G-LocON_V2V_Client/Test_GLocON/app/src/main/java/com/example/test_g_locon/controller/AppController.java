@@ -202,7 +202,7 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
         p2p.signalingRegister();
 
         // V2V: EdgeServerClientを初期化（グローバルIP確定後に生成する）
-        edgeServerClient = new EdgeServerClient(context, myUserInfo);
+        edgeServerClient = new EdgeServerClient(context, socket, myUserInfo);
         edgeServerClient.setCallback(new EdgeServerClient.IEdgeServerCallback() {
             @Override
             public void onJoinSent(Intersection intersection, long tJoinSentMs) {

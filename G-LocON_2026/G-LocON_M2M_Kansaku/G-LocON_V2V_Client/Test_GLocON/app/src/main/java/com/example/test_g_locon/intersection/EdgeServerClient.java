@@ -19,6 +19,10 @@ import java.util.concurrent.Executors;
  *
  * P2P.javaと同じく ExecutorService + Runnable パターンで非同期実行する。
  * 送信後にJOINの場合はp2p_logにt_join_sentを記録する。
+ *
+ * [NAT対応] JOIN/LEAVE は STUN・シグナリングと同じ共有ソケットから送信する。
+ * EdgeServer は返信（メンバー一覧・NAT_REGISTER通知）を共有ソケットのアドレスへ送るため，
+ * 使い捨てソケットから送ると NAT 環境では共有ソケット側にマッピングが無く返信が破棄される。
  */
 public class EdgeServerClient {
 
@@ -30,12 +34,15 @@ public class EdgeServerClient {
 
     private final ExecutorService executor = Executors.newCachedThreadPool();
     private final UserInfo myUserInfo;
+    /** STUN・シグナリング・P2Pと共有するソケット（受信は P2PReceiver が担当） */
+    private final DatagramSocket socket;
     private IEdgeServerCallback callback;
 
     // p2p_log.csv
     private final OutputToCSV p2pLog;
 
-    public EdgeServerClient(Context context, UserInfo myUserInfo) {
+    public EdgeServerClient(Context context, DatagramSocket socket, UserInfo myUserInfo) {
+        this.socket = socket;
         this.myUserInfo = myUserInfo;
         p2pLog = new OutputToCSV(context, "p2p_log.csv");
         p2pLog.OutputFieledName(
@@ -70,7 +77,7 @@ public class EdgeServerClient {
 
         @Override
         public void run() {
-            try (DatagramSocket socket = new DatagramSocket()) {
+            try {
                 EdgeServerJSONObject jsonBuilder = new EdgeServerJSONObject();
                 JSONObject json = jsonBuilder.buildJoin(
                         myUserInfo,
@@ -114,7 +121,7 @@ public class EdgeServerClient {
 
         @Override
         public void run() {
-            try (DatagramSocket socket = new DatagramSocket()) {
+            try {
                 EdgeServerJSONObject jsonBuilder = new EdgeServerJSONObject();
                 JSONObject json = jsonBuilder.buildLeave(
                         myUserInfo,
