@@ -67,7 +67,7 @@ G-LocON_2026/
 | `map/` | 拡張 | MapManager（ルート・交差点マーカー表示追加） |
 | `navigation/` | **★新規追加** | OSRM通信・ETA計算・IntersectionManager |
 | `intersection/` | **★新規追加** | EdgeServerClient・JOIN/LEAVE通信 |
-| `carla/` | **★新規追加（後期）** | CARLAシミュレーション対応（モードA/B） |
+| `carla/` | **★新規追加（後期・未実装）** | CARLAシミュレーション対応（モードA/B） |
 
 ### 2.3 G-LocON_V2V_Server モジュール構成
 
@@ -78,7 +78,7 @@ G-LocON_2026/
 | `MasterServer/` | **★新規** | 交差点ID → エッジサーバAddr配布 | 55556 |
 | `EdgeServer/` | **★新規** | 交差点V2Vグループ管理（交差点ごとに1プロセス） | 556XX |
 | `VirtualClient/` | 拡張（動作確認用） | V2Vシナリオのシミュレーション | - |
-| `CARLABridge/` | **★新規（後期）** | CARLAとAndroidを繋ぐPythonブリッジ | - |
+| `CARLABridge/` | **★新規（後期・未実装）** | CARLAとAndroidを繋ぐPythonブリッジ | - |
 
 ---
 
@@ -142,10 +142,10 @@ G-LocON_2026/
 | SEARCH | Client | EdgeServer | グループメンバー一覧の問い合わせ |
 | getPeripheralUserInfoList | EdgeServer | Client | グループメンバー一覧を返送 |
 | doUDPHolePunching | EdgeServer | Client（他車両） | NATホールパンチング通知 |
-| NATRegisterDstUsers | Client | 他車両 | NATに穴を開けるパケット |
+| NATRegisterDstAddrPort | Client | 他車両 | NATに穴を開けるパケット |
 | SendLocation | Client | 他車両 | P2P直接通信（位置情報送信） |
-| CARLA_LOCATION | CARLABridge | Client | CARLA車両の位置・速度・進行方向 |
-| VEHICLE_COMMAND | Client | CARLABridge | CARLA車両への行動指令（減速・復帰など） |
+| CARLA_LOCATION | CARLABridge | Client | CARLA車両の位置・速度・進行方向（未実装） |
+| VEHICLE_COMMAND | Client | CARLABridge | CARLA車両への行動指令（減速・復帰など）（未実装） |
 
 ### 4.2 ポート設計
 
@@ -164,21 +164,23 @@ G-LocON_2026/
 
 各セクション完了後に1コミットを記録する．
 
-| セクション | 内容 | コミットメッセージ |
-|-----------|------|------------------|
-| 1 | EdgeServer新規作成 | `add EdgeServer module for intersection V2V group management` |
-| 2 | MasterServer新規作成 | `add MasterServer module for edge server address distribution` |
-| 3 | Client: navigation/ 新規作成 | `add navigation package: OSRM route client and intersection manager` |
-| 4 | Client: intersection/ 新規作成 | `add intersection package: edge server JOIN/LEAVE client` |
-| 5 | AppController変更（V2Vロジック統合） | `extend AppController with V2V join/leave logic` |
-| 6 | MapManager・MainActivity変更（UI） | `extend UI: route display and intersection group status` |
-| 7 | carla/ パッケージ（モードA: 3端末） | `add CARLA bridge mode A: per-vehicle Android mapping` |
-| 8 | CARLAMultiVehicleSimulator（モードB: 1端末） | `add CARLA bridge mode B: single device multi-vehicle simulation` |
-| 9 | CARLABridge Pythonブリッジ | `add Python CARLA bridge for bidirectional simulation control` |
+| セクション | 内容 | コミットメッセージ | 状況 |
+|-----------|------|------------------|------|
+| 1 | EdgeServer新規作成 | `add EdgeServer module for intersection V2V group management` | ✅ 実装済み |
+| 2 | MasterServer新規作成 | `add MasterServer module for edge server address distribution` | ✅ 実装済み |
+| 3 | Client: navigation/ 新規作成 | `add navigation package: OSRM route client and intersection manager` | ✅ 実装済み |
+| 4 | Client: intersection/ 新規作成 | `add intersection package: edge server JOIN/LEAVE client` | ✅ 実装済み |
+| 5 | AppController変更（V2Vロジック統合） | `extend AppController with V2V join/leave logic` | ✅ 実装済み |
+| 6 | MapManager・MainActivity変更（UI） | `extend UI: route display and intersection group status` | ✅ 実装済み |
+| 7 | carla/ パッケージ（モードA: 3端末） | `add CARLA bridge mode A: per-vehicle Android mapping` | ⬜ 未実装 |
+| 8 | CARLAMultiVehicleSimulator（モードB: 1端末） | `add CARLA bridge mode B: single device multi-vehicle simulation` | ⬜ 未実装 |
+| 9 | CARLABridge Pythonブリッジ | `add Python CARLA bridge for bidirectional simulation control` | ⬜ 未実装 |
 
 ---
 
 ## 6. CARLAシミュレーション設計
+
+> **実装状況**: 本章は設計のみで，`carla/` パッケージ・CARLABridge は未実装（2026年9月時点）．
 
 ### 6.1 実験モード
 
@@ -299,14 +301,14 @@ V2Vあり vs V2Vなしを比較し，交通安全・効率への貢献を評価�
 
 既存の`OutputToCSV`クラスを流用し以下のCSVを出力する．
 
-| ログファイル | 記録内容 |
-|------------|---------|
-| `join_log.csv` | intersectionId, vehicleId, t_join_sent, t_join_acked, eta_at_join |
-| `p2p_log.csv` | intersectionId, peerId, t_p2p_established, t_arrive, margin_sec（接近前余裕時間） |
-| `reconnect_log.csv` | intersectionId, peerId, join_count, leave_count, redundant_attempts |
-| `packet_log.csv` | locationUpdateCount, endPointIP, endPointPort, send_time, ack_time, delay_ms |
-| `aoi_log.csv` | vehicleId, info_generated_at, info_received_at, aoi_ms |
-| `group_log.csv` | intersectionId, timestamp, member_count, member_ids |
+| ログファイル | 記録内容（設計） | 実装状況 |
+|------------|---------|---------|
+| `join_log.csv` | intersectionId, vehicleId, t_join_sent, t_join_acked, eta_at_join | ⚠️ 実装済み（項目が異なる）: `intersectionId, t_update_ms, eta_sec, distance_m, event`（IntersectionManager） |
+| `p2p_log.csv` | intersectionId, peerId, t_p2p_established, t_arrive, margin_sec（接近前余裕時間） | ⚠️ 実装済み（項目が異なる）: `intersectionId, t_join_sent_ms, eta_at_join_sec, edgeServerIp, edgeServerPort`（EdgeServerClient．実質JOIN送信ログ） |
+| `reconnect_log.csv` | intersectionId, peerId, join_count, leave_count, redundant_attempts | ⬜ 未実装 |
+| `packet_log.csv` | locationUpdateCount, endPointIP, endPointPort, send_time, ack_time, delay_ms | ⬜ 未実装 |
+| `aoi_log.csv` | vehicleId, info_generated_at, info_received_at, aoi_ms | ⬜ 未実装 |
+| `group_log.csv` | intersectionId, timestamp, member_count, member_ids | ⬜ 未実装（EdgeServerReceive のコメントに記載のみ） |
 
 ---
 
@@ -474,7 +476,7 @@ CSVには全交差点を記載し，起動するEdgeServerの行だけ有効に�
 実験予定地点にいない場合でも，仮想位置を使ってSIMを動かしてV2Vロジックをデバッグできる．
 
 **手順**:
-1. アプリの「スタート」ボタンで通信を開始する
+1. アプリの「開始」ボタンで通信を開始する
 2. ピアID・目的地を入力してルートを取得する
 3. **「仮想位置」ボタン**を押す → カメラが仮想座標（コード内 `TEST_LATITUDE/LONGITUDE`）に移動する
 4. **「SIM」ボタン**を押す → 仮想位置を起点にルート上を10m/sで自動走行する
