@@ -48,10 +48,11 @@
 
 ```
 G-LocON_2026/
-├── G-LocON_Client_2026/    旧改修版（OSM導入・コード整理済）
-├── G-LocON_Server_2026/    旧改修版
-├── G-LocON_V2V_Client/     ★ V2V応用版クライアント（本研究）
-└── G-LocON_V2V_Server/     ★ V2Vサーバ群（本研究）
+├── G-LocON_Client_2026/        旧改修版（OSM導入・コード整理済）
+├── G-LocON_Server_2026/        旧改修版
+└── G-LocON_M2M_Kansaku/
+    ├── G-LocON_V2V_Client/     ★ V2V応用版クライアント（本研究）
+    └── G-LocON_V2V_Server/     ★ V2Vサーバ群（本研究）
 ```
 
 ### 2.2 G-LocON_V2V_Client パッケージ構成
@@ -313,21 +314,28 @@ V2Vあり vs V2Vなしを比較し，交通安全・効率への貢献を評価�
 
 ### 8.1 サーバ起動手順（IntelliJ IDEA）
 
+#### 事前準備（新しい環境でクローンした場合）
+
+- **JDK 17** を用意する（プロジェクトSDK名 `17`．IntelliJで「JDK "17" が見つかりません」と出たら「ダウンロードするJDKの選択」から17を入れる）
+- 実行構成（Run Configuration）はリポジトリに含まれていない．各モジュールの `StartUp.java` を開き，`main` 横の▶で一度実行すると `master_server.StartUp` / `edge_server.StartUp` の構成が作られる
+- バッチファイル（方法B）を使う場合は，先に **ビルド → プロジェクトのビルド** を実行し `out/production/EdgeServer` を生成しておく
+
 #### MasterServer の起動
 
 1. **Run → Edit Configurations...** を開く
 2. 左ペインで `master_server.StartUp` を選択
 3. **作業ディレクトリ(W)** を以下に設定する
    ```
-   D:\Research\Program\G-LocON_2026\G-LocON_V2V_Server\MasterServer
+   <クローン先>\G-LocON_2026\G-LocON_M2M_Kansaku\G-LocON_V2V_Server\MasterServer
    ```
 4. **プログラムの引数** は空欄でよい（省略時は作業ディレクトリ直下の `edge_servers.csv` を自動参照）
 5. **適用 → OK** → △で実行
 6. コンソールに以下が表示されれば正常起動
    ```
-   EdgeServerRegistry: 37件 ロード完了
-   MasterServer 起動: port=55556 エッジサーバ登録数=37
+   EdgeServerRegistry: 3件 ロード完了
+   MasterServer 起動: port=55556 エッジサーバ登録数=3
    ```
+   ※ `edge_servers.csv` にはルート上の全交差点を記載しているが，EdgeServerを設置する3か所（ES1〜ES3）以外は `#` で無効化しているため3件となる（9.5参照）．
 
 #### EdgeServer の起動
 
@@ -346,18 +354,18 @@ EdgeServerは交差点1つにつき1プロセス起動する．起動する交�
 4. 構成名は `ES1_begin` `ES2_middle` `ES3_end` などわかりやすい名前にすること（同名だと並列起動できない）
 5. コンソールに以下が表示されれば正常起動
    ```
-   EdgeServer 起動: intersectionId=35.9515_139.6548 port=55601
+   EdgeServer 起動: intersectionId=35.95151_139.65476 port=55601
    ```
 
-**方法B: バッチファイルで起動する（IntelliJ不要）**
+**方法B: バッチファイルで起動する（起動時はIntelliJ不要）**
 
-`G-LocON_V2V_Server/EdgeServer/` に以下のバッチファイルを用意している．ダブルクリックで起動できる．
+`G-LocON_V2V_Server/EdgeServer/` に以下のバッチファイルを用意している．ダブルクリックで起動できる（事前にIntelliJでビルドしておくこと）．
 
 | ファイル | 交差点 | ポート |
 |---------|--------|--------|
-| `start_ES1_begin.bat` | 35.9515_139.6548 | 55601 |
-| `start_ES2_middle.bat` | 35.9463_139.6533 | 55616 |
-| `start_ES3_end.bat` | 35.9476_139.6455 | 55625 |
+| `start_ES1_begin.bat` | 35.95151_139.65476 | 55601 |
+| `start_ES2_middle.bat` | 35.94627_139.65333 | 55616 |
+| `start_ES3_end.bat` | 35.94763_139.64549 | 55625 |
 
 ---
 
@@ -439,9 +447,9 @@ CSVには全交差点を記載し，起動するEdgeServerの行だけ有効に�
 
 ```csv
 # 有効（マーカー表示・JOIN/LEAVE対象）
-35.9515_139.6548,172.20.10.4,55601
+35.95151_139.65476,192.168.137.1,55601
 # 無効（コメントアウト・マーカー非表示）
-#35.9506_139.6545,172.20.10.4,55602
+#35.95064_139.65446,192.168.137.1,55602
 ```
 
 **切り替え手順**:

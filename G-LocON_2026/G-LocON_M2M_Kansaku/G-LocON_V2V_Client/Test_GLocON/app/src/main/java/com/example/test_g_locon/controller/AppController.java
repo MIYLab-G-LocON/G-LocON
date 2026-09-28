@@ -117,7 +117,8 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
     private static final long SEARCH_INTERVAL_SEC = 5;
 
     // ---- V2V拡張フィールド ----
-    private static final String MASTER_SERVER_IP   = "172.20.10.4"; // テザリング
+//    private static final String MASTER_SERVER_IP   = "172.20.10.4"; // テザリング
+    private static final String MASTER_SERVER_IP   = "192.168.137.1"; // PCホットスポット（MainActivity.SERVER_IP と揃える）
     private static final int    MASTER_SERVER_PORT = 55556;
 
     private final IntersectionManager intersectionManager;
