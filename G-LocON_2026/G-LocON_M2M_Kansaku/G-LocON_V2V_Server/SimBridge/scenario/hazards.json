@@ -1,0 +1,266 @@
+[
+ {
+  "vehicle": "fwd.4",
+  "intersectionId": "35.94627_139.65333",
+  "junction": "8155282206",
+  "trigger_m": 40,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "fwd.7",
+  "intersectionId": "35.94763_139.64549",
+  "junction": "1104250873",
+  "trigger_m": 60,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "fwd.10",
+  "intersectionId": "35.95151_139.65476",
+  "junction": "cluster_6534864471_7410131676",
+  "trigger_m": 80,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "fwd.13",
+  "intersectionId": "35.94627_139.65333",
+  "junction": "8155282206",
+  "trigger_m": 100,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "fwd.16",
+  "intersectionId": "35.94763_139.64549",
+  "junction": "1104250873",
+  "trigger_m": 40,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "fwd.19",
+  "intersectionId": "35.95151_139.65476",
+  "junction": "cluster_6534864471_7410131676",
+  "trigger_m": 60,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "fwd.22",
+  "intersectionId": "35.94627_139.65333",
+  "junction": "8155282206",
+  "trigger_m": 80,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "fwd.25",
+  "intersectionId": "35.94763_139.64549",
+  "junction": "1104250873",
+  "trigger_m": 100,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "fwd.28",
+  "intersectionId": "35.95151_139.65476",
+  "junction": "cluster_6534864471_7410131676",
+  "trigger_m": 40,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "fwd.31",
+  "intersectionId": "35.94627_139.65333",
+  "junction": "8155282206",
+  "trigger_m": 60,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "fwd.34",
+  "intersectionId": "35.94763_139.64549",
+  "junction": "1104250873",
+  "trigger_m": 80,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "fwd.37",
+  "intersectionId": "35.95151_139.65476",
+  "junction": "cluster_6534864471_7410131676",
+  "trigger_m": 100,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "fwd.40",
+  "intersectionId": "35.94627_139.65333",
+  "junction": "8155282206",
+  "trigger_m": 40,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "fwd.43",
+  "intersectionId": "35.94763_139.64549",
+  "junction": "1104250873",
+  "trigger_m": 60,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "fwd.46",
+  "intersectionId": "35.95151_139.65476",
+  "junction": "cluster_6534864471_7410131676",
+  "trigger_m": 80,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "fwd.49",
+  "intersectionId": "35.94627_139.65333",
+  "junction": "8155282206",
+  "trigger_m": 100,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "fwd.52",
+  "intersectionId": "35.94763_139.64549",
+  "junction": "1104250873",
+  "trigger_m": 40,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "fwd.55",
+  "intersectionId": "35.95151_139.65476",
+  "junction": "cluster_6534864471_7410131676",
+  "trigger_m": 60,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "fwd.58",
+  "intersectionId": "35.94627_139.65333",
+  "junction": "8155282206",
+  "trigger_m": 80,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "fwd.61",
+  "intersectionId": "35.94763_139.64549",
+  "junction": "1104250873",
+  "trigger_m": 100,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "fwd.64",
+  "intersectionId": "35.95151_139.65476",
+  "junction": "cluster_6534864471_7410131676",
+  "trigger_m": 40,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "fwd.67",
+  "intersectionId": "35.94627_139.65333",
+  "junction": "8155282206",
+  "trigger_m": 60,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "bwd.3",
+  "intersectionId": "35.94627_139.65333",
+  "junction": "8155282206",
+  "trigger_m": 40,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "bwd.6",
+  "intersectionId": "35.94763_139.64549",
+  "junction": "1104250873",
+  "trigger_m": 60,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "bwd.9",
+  "intersectionId": "35.95151_139.65476",
+  "junction": "cluster_6534864471_7410131676",
+  "trigger_m": 80,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "bwd.12",
+  "intersectionId": "35.94627_139.65333",
+  "junction": "8155282206",
+  "trigger_m": 100,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "bwd.15",
+  "intersectionId": "35.94763_139.64549",
+  "junction": "1104250873",
+  "trigger_m": 40,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "bwd.18",
+  "intersectionId": "35.95151_139.65476",
+  "junction": "cluster_6534864471_7410131676",
+  "trigger_m": 60,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "bwd.21",
+  "intersectionId": "35.94627_139.65333",
+  "junction": "8155282206",
+  "trigger_m": 80,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "bwd.24",
+  "intersectionId": "35.94763_139.64549",
+  "junction": "1104250873",
+  "trigger_m": 100,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "bwd.27",
+  "intersectionId": "35.95151_139.65476",
+  "junction": "cluster_6534864471_7410131676",
+  "trigger_m": 40,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "bwd.30",
+  "intersectionId": "35.94627_139.65333",
+  "junction": "8155282206",
+  "trigger_m": 60,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "bwd.33",
+  "intersectionId": "35.94763_139.64549",
+  "junction": "1104250873",
+  "trigger_m": 80,
+  "stop_sec": 12,
+  "decel": 8.0
+ }
+]

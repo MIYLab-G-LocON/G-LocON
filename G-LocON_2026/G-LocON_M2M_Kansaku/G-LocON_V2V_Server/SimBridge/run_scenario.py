@@ -8,7 +8,7 @@ mode:
     none  : V2Vなし（下限）。急停止の情報は誰にも届かない
     ideal : 理想V2V（上限）。本システムと同じ規則（ETA<τでJOIN，通過してδ離れたらLEAVE）で
             交差点グループを作り，急停止が起きたら同じグループの後続車へ latency 秒後に通知，
-            後続車は減速（DECELERATE）し，解消後に復帰（RESUME）する。
+            後続車は希望速度を warn-speed に下げて減速（DECELERATE）し，解消後に復帰（RESUME）する。
             通信の損失・遅延のばらつきは無い。実機・アプリをつないだ実験（段階3以降）の比較対象になる。
 
 出力（out/<mode>_s<seed>/）:
@@ -22,7 +22,6 @@ import argparse
 import csv
 import json
 import os
-import random
 
 import common
 
@@ -136,7 +135,7 @@ def main():
     traci.start(cmd)
 
     with open(os.path.join(common.SCENARIO_DIR, "hazards.json"), encoding="utf-8") as f:
-        hazards = sorted(json.load(f), key=lambda h: h["time"])
+        hazards = json.load(f)
     junctions, jids = {}, {}
     with open(common.INTERSECTION_MAP, encoding="utf-8") as f:
         for r in csv.DictReader(f):
@@ -145,7 +144,6 @@ def main():
                 jids[r["intersectionId"]] = r["junctionId"]
     routes = RouteIndex(traci, common.load_net(), jids)
 
-    rng = random.Random(a.seed)
     gf = open(os.path.join(out, "group_log.csv"), "w", newline="", encoding="utf-8")
     gw = csv.writer(gf); gw.writerow(["t", "intersectionId", "vehicle", "event", "eta_or_dist"])
     hf = open(os.path.join(out, "hazard_log.csv"), "w", newline="", encoding="utf-8")
@@ -155,7 +153,6 @@ def main():
     active = []      # [{veh, until, iid}]
     pending = []     # 通知の遅延キュー [(deliver_t, hazard)]
     warned = {}      # 減速中の車 → 解除時刻
-    hi = 0
     step_len = traci.simulation.getDeltaT()
     end_t = traci.simulation.getEndTime()
     while traci.simulation.getMinExpectedNumber() > 0 and traci.simulation.getTime() < end_t:
@@ -164,24 +161,30 @@ def main():
         if int(now / step_len) % 2 == 0:
             groups.update(now)
 
-        # 急停止イベントの発生
-        while hi < len(hazards) and now >= hazards[hi]["time"]:
-            h = hazards[hi]; hi += 1
-            lo, up = h["upstream_m"]
-            cands = []
-            for v in traci.vehicle.getIDList():
-                d = routes.distance(v, h["intersectionId"])
-                if d is not None and lo <= d <= up and traci.vehicle.getSpeed(v) > 5:
-                    cands.append(v)
-            if not cands:
-                hw.writerow([f"{now:.1f}", h["intersectionId"], "", "SKIP_NO_VEHICLE", "", ""])
+        # 急停止イベントの発生（指定車両が交差点の手前 trigger_m に来たら）
+        for h in hazards:
+            if h.get("done"):
                 continue
-            v = rng.choice(cands)
+            v = h["vehicle"]
+            if v not in traci.vehicle.getIDList():
+                if h.get("seen"):
+                    h["done"] = True
+                    hw.writerow([f"{now:.1f}", h["intersectionId"], v, "SKIP_ARRIVED", "", ""])
+                continue
+            h["seen"] = True
+            d = routes.distance(v, h["intersectionId"])
+            if d is None:
+                h["done"] = True       # 交差点を通過してしまった（渋滞で速度が出ていなかった等）
+                hw.writerow([f"{now:.1f}", h["intersectionId"], v, "SKIP_PASSED", "", ""])
+                continue
             spd = traci.vehicle.getSpeed(v)
+            if d > h["trigger_m"] or spd < 3.0:
+                continue
+            h["done"] = True
             traci.vehicle.setDecel(v, h["decel"])
             traci.vehicle.slowDown(v, 0.0, max(spd / h["decel"], 0.5))
             active.append({"veh": v, "until": now + h["stop_sec"] + spd / h["decel"], "iid": h["intersectionId"]})
-            hw.writerow([f"{now:.1f}", h["intersectionId"], v, "SUDDEN_STOP", "", f"speed={spd:.1f}"])
+            hw.writerow([f"{now:.1f}", h["intersectionId"], v, "SUDDEN_STOP", "", f"speed={spd:.1f},dist={d:.1f}"])
             if a.mode == "ideal":
                 pending.append((now + a.latency, {"veh": v, "iid": h["intersectionId"],
                                                   "until": active[-1]["until"]}))
@@ -192,7 +195,7 @@ def main():
                 active.remove(h); continue
             if now >= h["until"]:
                 traci.vehicle.setSpeed(h["veh"], -1)
-                traci.vehicle.setDecel(h["veh"], 4.5)
+                traci.vehicle.setDecel(h["veh"], 3.0)
                 active.remove(h)
                 hw.writerow([f"{now:.1f}", h["iid"], h["veh"], "RESUME_HAZARD", "", ""])
             else:
@@ -214,16 +217,24 @@ def main():
                 d = traci.vehicle.getDrivingDistance(m, h_edge, h_pos)
                 if d is None or d <= 0 or d > 1e6:
                     continue            # 後続ではない（前方・対向・別ルート）
-                traci.vehicle.slowDown(m, min(a.warn_speed, traci.vehicle.getSpeed(m)), 3.0)
-                traci.vehicle.setSpeed(m, min(a.warn_speed, traci.vehicle.getSpeed(m)))
-                warned[m] = h["until"]
+                # 希望速度（上限）を下げる。減速そのものは車両モデル（IDM）が安全に行うため，
+                # 通知によって後続車との安全距離が崩れることはない（TraCIで速度を直接指定すると崩れる）
+                # 一気に下げるとIDMが急ブレーキをかけるため，2 m/s^2 相当で段階的に下げる（下の保持処理）
+                if m not in warned:
+                    warned[m] = {"until": h["until"], "orig": traci.vehicle.getMaxSpeed(m),
+                                 "cur": max(traci.vehicle.getSpeed(m), a.warn_speed)}
+                else:
+                    warned[m]["until"] = max(warned[m]["until"], h["until"])
                 hw.writerow([f"{now:.1f}", h["iid"], hv, "DECELERATE", m, f"gap={d:.1f}"])
 
-        for m, until in list(warned.items()):
+        for m, w in list(warned.items()):
             if m not in traci.vehicle.getIDList():
                 del warned[m]; continue
-            if now >= until:
-                traci.vehicle.setSpeed(m, -1)
+            if now < w["until"]:
+                w["cur"] = max(a.warn_speed, w["cur"] - 2.0 * step_len)
+                traci.vehicle.setMaxSpeed(m, w["cur"])
+            else:
+                traci.vehicle.setMaxSpeed(m, w["orig"])
                 del warned[m]
                 hw.writerow([f"{now:.1f}", "", "", "RESUME", m, ""])
 

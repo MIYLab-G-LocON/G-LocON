@@ -23,7 +23,7 @@ def convert():
     cmd = [
         common.sumo_bin("netconvert"),
         "--osm-files", common.OSM_FILE,
-        "--type-files", typemap,
+        "--type-files", typemap + "," + os.path.join(common.HERE, "osm", "service_passenger.typ.xml"),
         "-o", common.NET_FILE,
         # 車が走る道路だけを残す
         "--keep-edges.by-vclass", "passenger",

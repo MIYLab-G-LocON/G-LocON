@@ -1,0 +1,5 @@
+<!-- SUMO標準の型定義では highway=service（構内道路など）は配送車のみ通行可。
+     アプリ側のルート（OSRM, 自動車）は構内道路を通るため，乗用車も通れるように上書きする。 -->
+<types>
+    <type id="highway.service" numLanes="1" speed="5.56" priority="1" oneway="false" allow="passenger delivery pedestrian bicycle"/>
+</types>

@@ -7,8 +7,8 @@
     hazards.json     急停止イベント（エッジサーバ交差点の手前で先行車が急停止）
     scenario.sumocfg SUMO設定
 
-車両モデルは「V2Vの有無で差が出る」よう，完全な安全運転ではなく
-運転のばらつき(sigma)・反応の遅れ(actionStepLength/tau)を持たせている。
+車両モデルは IDM（快適な減速度 3.0 m/s^2 を超える減速は危険時のみ起きる）とし，
+反応の遅れ(actionStepLength=1.0秒)と速度のばらつき(speedFactor)を持たせている。
 """
 import argparse
 import csv
@@ -19,9 +19,9 @@ import sys
 
 import common
 
-VTYPES = """    <vType id="car" vClass="passenger" carFollowModel="Krauss"
-           accel="2.6" decel="4.5" emergencyDecel="9.0" apparentDecel="4.5"
-           sigma="0.5" tau="1.0" actionStepLength="1.0" minGap="2.0"
+VTYPES = """    <vType id="car" vClass="passenger" carFollowModel="IDM"
+           accel="2.6" decel="3.0" emergencyDecel="9.0" apparentDecel="3.0"
+           tau="1.0" actionStepLength="1.0" minGap="2.0" delta="4"
            speedFactor="normc(1.0,0.1,0.8,1.2)" length="4.5"/>
 """
 
@@ -35,12 +35,45 @@ def nearest_edge(net, lat, lon, radius=80):
     return min(cands, key=lambda c: c[1])[0]
 
 
-def route_edges(net, a, b):
-    ea, eb = nearest_edge(net, *a), nearest_edge(net, *b)
-    path, _ = net.getShortestPath(ea, eb, vClass="passenger")
+def osrm_junctions():
+    """edge_servers.csv に並んでいる OSRM 交差点（ルート順）の SUMO交差点ID."""
+    jmap = {}
+    with open(common.INTERSECTION_MAP, encoding="utf-8") as f:
+        for r in csv.DictReader(f):
+            jmap[r["intersectionId"]] = r["junctionId"]
+    seq = []
+    for iid, *_ in common.read_edge_servers(include_commented=True):   # ファイル順＝OSRMのルート順
+        j = jmap.get(iid)
+        if j and (not seq or seq[-1] != j):
+            seq.append(j)
+    return seq
+
+
+def route_edges(net, a, b, via):
+    """a→b を，アプリ側（OSRM）と同じ交差点 via を順に通るルートにする."""
+    cur, end = nearest_edge(net, *a), nearest_edge(net, *b)
+    edges = [cur]
+    for jid in via:
+        node = net.getNode(jid)
+        if cur.getToNode() == node:
+            continue
+        best = None
+        for cand in node.getIncoming():
+            if not cand.allows("passenger"):
+                continue
+            path, cost = net.getShortestPath(cur, cand, vClass="passenger")
+            if path and (best is None or cost < best[1]):
+                best = (path, cost)
+        if best is None:
+            print(f"  注意: 交差点 {jid} へ到達できないため飛ばします")
+            continue
+        edges += best[0][1:]
+        cur = edges[-1]
+    path, _ = net.getShortestPath(cur, end, vClass="passenger")
     if not path:
-        sys.exit("始点→終点のルートが見つかりません")
-    return [e.getID() for e in path]
+        sys.exit("終点へのルートが見つかりません")
+    edges += path[1:]
+    return [e.getID() for e in edges]
 
 
 def active_junctions():
@@ -61,8 +94,9 @@ def main():
     a = ap.parse_args()
 
     net = common.load_net()
-    fwd = route_edges(net, common.ROUTE_START, common.ROUTE_END)
-    bwd = route_edges(net, common.ROUTE_END, common.ROUTE_START)
+    via = osrm_junctions()
+    fwd = route_edges(net, common.ROUTE_START, common.ROUTE_END, via)
+    bwd = route_edges(net, common.ROUTE_END, common.ROUTE_START, list(reversed(via)))
     print(f"実験ルート: {len(fwd)} エッジ, 逆方向: {len(bwd)} エッジ")
 
     vtypes = os.path.join(common.SCENARIO_DIR, "vtypes.add.xml")
@@ -99,15 +133,20 @@ def main():
                 f'vehsPerHour="{a.main_vph / 2}" departLane="best" departSpeed="max"/>\n')
         f.write("</routes>\n")
 
-    # 急停止イベント: 各エッジサーバ交差点で，200秒以降に数回
+    # 急停止イベント: 実験ルートの特定の車両が，エッジサーバ交差点の手前 trigger_m で急停止する。
+    # 車両IDと場所を固定するため，V2Vなし／ありで全く同じ急停止が起きる（対応のある比較）
     js = active_junctions()
+    n_fwd = int(a.main_vph * a.end / 3600)
+    n_bwd = int(a.main_vph / 2 * a.end / 3600)
     hazards = []
-    t = 200
-    while t < a.end - 100:
-        for j in js:
-            hazards.append({"time": t, "intersectionId": j["intersectionId"], "junction": j["junctionId"],
-                            "upstream_m": [30, 120], "stop_sec": 12, "decel": 8.0})
-            t += 60
+    for k, n in enumerate(range(4, n_fwd - 5, 3)):
+        j = js[k % len(js)]
+        hazards.append({"vehicle": f"fwd.{n}", "intersectionId": j["intersectionId"], "junction": j["junctionId"],
+                        "trigger_m": 40 + 20 * (k % 4), "stop_sec": 12, "decel": 8.0})
+    for k, n in enumerate(range(3, n_bwd - 3, 3)):
+        j = js[k % len(js)]
+        hazards.append({"vehicle": f"bwd.{n}", "intersectionId": j["intersectionId"], "junction": j["junctionId"],
+                        "trigger_m": 40 + 20 * (k % 4), "stop_sec": 12, "decel": 8.0})
     with open(os.path.join(common.SCENARIO_DIR, "hazards.json"), "w", encoding="utf-8") as f:
         json.dump(hazards, f, ensure_ascii=False, indent=1)
 
