@@ -73,6 +73,9 @@ python sim_bridge.py --phones 0 --virtual --gui --local   # 実機なし・PCだ
 
 ### sumo-gui の色（--gui）
 
+車両を右クリック →「Show Parameter」で，その車のルート上のエッジサーバ交差点（`glocon.es_on_route`），
+JOIN中の交差点（`glocon.joined`），LEAVE済みの交差点（`glocon.left`）を確認できる。
+
 表示設定は `gui_settings.xml`（画面上部の表示方式の欄で「G-LocON」が選ばれる）。このファイルには XML のコメントを書かないこと（書くと SUMO が設定を読み込まず標準の表示になる）。
 
 | 色 | 意味 |

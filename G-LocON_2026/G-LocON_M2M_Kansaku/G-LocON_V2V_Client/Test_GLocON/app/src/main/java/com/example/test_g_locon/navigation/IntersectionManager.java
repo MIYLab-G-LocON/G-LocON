@@ -17,7 +17,16 @@ import java.util.concurrent.CopyOnWriteArrayList;
  *
  * パラメータ:
  *   ETA_THRESHOLD_SEC  = 30.0  : ETA がこの値以下になったらJOIN
- *   LEAVE_THRESHOLD_M  = 30.0  : 交差点から この距離以上かつ遠ざかっていたらLEAVE
+ *   PASS_RADIUS_M      = 20.0  : 交差点にこの距離まで近づいたら「通過済み」とする
+ *   LEAVE_THRESHOLD_M  = 30.0  : 通過済みで，交差点から この距離以上かつ遠ざかっていたらLEAVE
+ *
+ * 通過済みの判定（PASS_RADIUS_M）は，SUMOで全車両の位置を1秒ごと（アプリと同じ間隔）に記録し，
+ * 交差点に最も近づいた距離を集計して決めた（エッジサーバ交差点196回の通過で 99% が 10.5m 以内，最大 11.0m，
+ * 全交差点8,922回で最大 18.9m）。実機ではGPSの誤差が加わるため余裕を持たせて 20m とし，
+ * それでも近づかずに通り過ぎた場合は，ルート上の後の交差点を通過した時点で前の交差点を LEAVE する。
+ *
+ * 通過はルートの順番に沿って判定する（まだ通過していない最初の交差点から PASS_LOOKAHEAD 個先まで）。
+ * ルートが後で出発地点の近くに戻ってくる場合に，出発直後に遠い先の交差点を「通過済み」としないため。
  */
 public class IntersectionManager {
 
@@ -28,6 +37,8 @@ public class IntersectionManager {
 
     private static final double ETA_THRESHOLD_SEC = 30.0;
     private static final double LEAVE_THRESHOLD_M = 30.0;
+    private static final double PASS_RADIUS_M     = 20.0;
+    private static final int    PASS_LOOKAHEAD    = 3;
     private static final double MIN_SPEED_MPS     = 1.0; // ETA計算の最低速度（停止中の除算エラー防止）
 
     private final List<Intersection> intersections = new CopyOnWriteArrayList<>();
@@ -67,13 +78,44 @@ public class IntersectionManager {
         double speed = Math.max(speedMs, MIN_SPEED_MPS);
         long now = System.currentTimeMillis();
 
-        for (Intersection intersection : intersections) {
+        // 通過判定（リストはルート順）: まだ通過していない最初の交差点から PASS_LOOKAHEAD 個先までを見て，
+        // PASS_RADIUS_M 以内に入った最も先の交差点までを通過済みとする
+        int n = intersections.size();
+        int next = 0;
+        while (next < n && intersections.get(next).isPassed()) next++;
+        int lastPassed = next - 1;
+        for (int k = 0; k < n; k++) {
+            Intersection intersection = intersections.get(k);
             double dist = hubeny.calcDistance(myLat, myLng,
                     intersection.getLat(), intersection.getLng());
             intersection.setDistanceM(dist);
+            if (k >= next && k <= next + PASS_LOOKAHEAD && dist <= PASS_RADIUS_M) {
+                intersection.setPassed(true);
+                lastPassed = Math.max(lastPassed, k);
+            }
+        }
+
+        for (int k = 0; k < intersections.size(); k++) {
+            Intersection intersection = intersections.get(k);
+            double dist = intersection.getDistanceM();
 
             double eta = dist / speed;
             intersection.setEtaSec(eta);
+
+            // 保険: ルート上の後の交差点を通過したのに，この交差点は近づかないまま（GPSのずれなど）
+            //       → 通過したものとみなし，JOIN中なら LEAVE，未JOINならこの先JOINしない
+            if (k < lastPassed && !intersection.isPassed()) {
+                intersection.setPassed(true);
+                if (intersection.isJoined()) {
+                    intersection.setJoined(false);
+                    intersection.setHasJoinedAndLeft(true);
+                    logJoin(intersection, now, "LEAVE_PASSED_NEXT");
+                    if (callback != null) callback.onShouldLeave(intersection);
+                } else {
+                    intersection.setHasJoinedAndLeft(true);
+                }
+                continue;
+            }
 
             if (!intersection.isJoined() && !intersection.hasJoinedAndLeft()
                     && intersection.hasEdgeServer()) {

@@ -44,6 +44,8 @@ import common
 KEEPALIVE_SEC = 15.0
 UPDATE_SEC = 1.0          # アプリと同じ1秒ごとの位置更新
 MIN_SPEED = 1.0           # アプリと同じ（ETA計算の最低速度）
+PASS_RADIUS_M = 20.0      # アプリと同じ: この距離まで近づいたら交差点を「通過済み」とする
+PASS_LOOKAHEAD = 3        # アプリと同じ: 通過判定はまだ通過していない最初の交差点からこの個数先まで
 GRACE_SEC = 2.0           # 一覧の一致判定で，直近のJOIN/LEAVEを通知待ちとして除外する時間
 PALETTE = [(230, 25, 75), (60, 180, 75), (255, 225, 25), (0, 130, 200), (245, 130, 48),
            (145, 30, 180), (70, 240, 240), (240, 50, 230), (210, 245, 60), (0, 128, 128)]
@@ -67,12 +69,14 @@ class Intersection:
         self.prev = -1.0
         self.joined = False
         self.left = False
+        self.passed = False
 
     def set_dist(self, d):
         self.prev, self.dist = self.dist, d
 
     def should_leave(self):
-        return self.prev >= 0 and self.dist >= common.LEAVE_DIST_M and self.dist > self.prev
+        # アプリと同じ: 通過済みで，δ以上離れ，かつ遠ざかっている
+        return self.passed and self.prev >= 0 and self.dist >= common.LEAVE_DIST_M and self.dist > self.prev
 
 
 class Bridge:
@@ -105,8 +109,12 @@ class Bridge:
         route = self.t.vehicle.getRoute(vid)
         idx = max(self.t.vehicle.getRouteIndex(vid), 0)
         seq, seen = [], set()
-        for e in route[idx:]:
-            j = self.net.getEdge(e).getToNode().getID()
+        # 先頭は今いる道路の始点（アプリの OSRM ルートが出発地点の交差点から始まるのと同じ）。
+        # これが無いと，ルートが後で出発地点を通り直すとき，その交差点が出発直後に「通過済み」になり，
+        # それより手前の交差点が飛ばされてしまう
+        nodes = [self.net.getEdge(route[idx]).getFromNode().getID()] + \
+                [self.net.getEdge(e).getToNode().getID() for e in route[idx:]]
+        for j in nodes:
             info = self.route_ix.get(j)
             if info and info[0] not in seen:
                 seen.add(info[0])
@@ -352,9 +360,26 @@ class VirtualClient:
         self.count += 1
         lat, lon = self.user()
         speed = max(br.t.vehicle.getSpeed(self.vid), MIN_SPEED)
-        for it in self.ix.values():        # アプリの IntersectionManager.update と同じ判定
+        seq = list(self.ix.values())       # ルート順（アプリの IntersectionManager.update と同じ判定）
+        nxt = 0
+        while nxt < len(seq) and seq[nxt].passed:
+            nxt += 1
+        last_passed = nxt - 1
+        for k, it in enumerate(seq):
             it.set_dist(hubeny(lat, lon, it.lat, it.lon))
+            if nxt <= k <= nxt + PASS_LOOKAHEAD and it.dist <= PASS_RADIUS_M:
+                it.passed = True
+                last_passed = max(last_passed, k)
+        for k, it in enumerate(seq):
             eta = it.dist / speed
+            if k < last_passed and not it.passed:
+                # 保険: 後の交差点を通過したのに近づかないままだった → 通過したものとみなす
+                it.passed = True
+                if it.joined:
+                    self.leave(it, lat, lon, "V_LEAVE_PASSED_NEXT")
+                else:
+                    it.left = True
+                continue
             if not it.joined and not it.left and it.es:
                 if eta < common.JOIN_ETA_SEC:
                     it.joined = True
@@ -369,6 +394,7 @@ class VirtualClient:
                     br.stats["join_sent"] += 1
                     br.log("V_JOIN", self.peer, it.iid, f"eta={eta:.1f}")
                     br.set_color(self.vid, it.iid)
+                    self.show_state()
             elif it.joined and it.should_leave():
                 self.leave(it, lat, lon, "V_LEAVE")
         for iid, t0 in self.last_keep.items():
@@ -391,6 +417,21 @@ class VirtualClient:
             for addr in targets.values():
                 self.send(msg, addr)
 
+    def show_state(self):
+        """sumo-gui の車両の右クリック→「Show Parameter」に，グループの状態を表示する."""
+        if not self.br.a.gui or self.vid not in self.br.alive:
+            return
+        t = self.br.t
+        try:
+            t.vehicle.setParameter(self.vid, "glocon.es_on_route",
+                                   " ".join(i.iid for i in self.ix.values() if i.es) or "-")
+            t.vehicle.setParameter(self.vid, "glocon.joined",
+                                   " ".join(i.iid for i in self.ix.values() if i.joined) or "-")
+            t.vehicle.setParameter(self.vid, "glocon.left",
+                                   " ".join(i.iid for i in self.ix.values() if i.es and i.left) or "-")
+        except Exception:
+            pass
+
     def leave(self, it, lat, lon, ev):
         br = self.br
         it.joined, it.left = False, True
@@ -399,9 +440,10 @@ class VirtualClient:
         br.joined_truth.get(it.iid, set()).discard(self.peer)
         br.changed[(it.iid, self.peer)] = br.now()
         br.stats["leave_sent"] += 1
-        br.log(ev, self.peer, it.iid, "")
+        br.log(ev, self.peer, it.iid, f"dist={it.dist:.0f}")
         others = [i for i in self.ix.values() if i.joined]
         br.set_color(self.vid, others[0].iid if others else None)
+        self.show_state()
 
     def on_message(self, msg, addr):
         br = self.br
@@ -413,6 +455,7 @@ class VirtualClient:
                 if it:                                   # アプリと同じく完全一致のみ採用
                     it.es = (br.a.override_es_ip or e["ip"], int(e["port"]))
             br.log("V_QUERY_OK", self.peer, "", f"es={sum(1 for i in self.ix.values() if i.es)}")
+            self.show_state()
             return
         iid = msg.get("intersectionId")
         if iid not in self.ix:
@@ -501,7 +544,11 @@ def main():
         for k, iid in enumerate(sorted(common.read_sim_edge_servers())):
             x, y = traci.junction.getPosition(common.read_sim_edge_servers()[iid])
             col = PALETTE[k % len(PALETTE)] + (255,)
-            traci.poi.add(f"ES{k}", x, y, col, poiType="edgeServer", layer=5, width=24, height=24)
+            # 円（半径15m）は縮小しても消えないよう多角形で描き，ラベル（ES番号）は印で表示する
+            circle = [(x + 15 * math.cos(2 * math.pi * i / 24), y + 15 * math.sin(2 * math.pi * i / 24))
+                      for i in range(24)]
+            traci.polygon.add(f"ES{k}_area", circle, col, fill=True, polygonType="edgeServer", layer=5)
+            traci.poi.add(f"ES{k}", x, y, col, poiType="edgeServer", layer=6, width=6, height=6)
     ef = open(os.path.join(a.out, "events.csv"), "w", newline="", encoding="utf-8")
     ew = csv.writer(ef)
     ew.writerow(["simTime", "wallTime", "event", "peer", "target", "detail"])
