@@ -10,7 +10,7 @@
 3. [各モジュール設計方針](#3-各モジュール設計方針)
 4. [通信プロトコル設計](#4-通信プロトコル設計)
 5. [実装順序とgit記録方針](#5-実装順序とgit記録方針)
-6. [CARLAシミュレーション設計](#6-carlaシミュレーション設計)
+6. [シミュレーション設計（SUMO）](#6-シミュレーション設計sumo)
 7. [評価設計](#7-評価設計)
 8. [起動手順](#8-起動手順)
 9. [トラブルシューティング](#9-トラブルシューティング)
@@ -67,7 +67,7 @@ G-LocON_2026/
 | `map/` | 拡張 | MapManager（ルート・交差点マーカー表示追加） |
 | `navigation/` | **★新規追加** | OSRM通信・ETA計算・IntersectionManager |
 | `intersection/` | **★新規追加** | EdgeServerClient・JOIN/LEAVE通信 |
-| `carla/` | **★新規追加（後期・未実装）** | CARLAシミュレーション対応（モードA/B） |
+| `sim/` | **★新規追加（未実装）** | 交通シミュレータ（SUMO）連携：SimBridgeから受け取った位置でアプリを動かす（モードA/B） |
 
 ### 2.3 G-LocON_V2V_Server モジュール構成
 
@@ -78,7 +78,7 @@ G-LocON_2026/
 | `MasterServer/` | **★新規** | 交差点ID → エッジサーバAddr配布 | 55556 |
 | `EdgeServer/` | **★新規** | 交差点V2Vグループ管理（交差点ごとに1プロセス） | 556XX |
 | `VirtualClient/` | 拡張（動作確認用） | V2Vシナリオのシミュレーション | - |
-| `CARLABridge/` | **★新規（後期・未実装）** | CARLAとAndroidを繋ぐPythonブリッジ | - |
+| `SimBridge/` | **★新規（未実装）** | SUMO（TraCI）とAndroidを繋ぐPythonブリッジ．シナリオ（道路網・交通流）もここに置く | 55700（予定） |
 
 ---
 
@@ -146,8 +146,8 @@ G-LocON_2026/
 | peerLeft | EdgeServer | Client（残りの車両） | 他の車両がLEAVEしたことの通知．受け取った車両はその交差点グループのメンバーから外す |
 | NATRegisterDstAddrPort | Client | 他車両 | NATに穴を開けるパケット |
 | SendLocation | Client | 他車両 | P2P直接通信（位置情報送信） |
-| CARLA_LOCATION | CARLABridge | Client | CARLA車両の位置・速度・進行方向（未実装） |
-| VEHICLE_COMMAND | Client | CARLABridge | CARLA車両への行動指令（減速・復帰など）（未実装） |
+| SIM_LOCATION | SimBridge | Client | シミュレータ車両の位置・速度・進行方向（未実装） |
+| VEHICLE_COMMAND | Client | SimBridge | シミュレータ車両への行動指令（減速・復帰など）（未実装） |
 
 ### 4.2 ポート設計
 
@@ -174,36 +174,92 @@ G-LocON_2026/
 | 4 | Client: intersection/ 新規作成 | `add intersection package: edge server JOIN/LEAVE client` | ✅ 実装済み |
 | 5 | AppController変更（V2Vロジック統合） | `extend AppController with V2V join/leave logic` | ✅ 実装済み |
 | 6 | MapManager・MainActivity変更（UI） | `extend UI: route display and intersection group status` | ✅ 実装済み |
-| 7 | carla/ パッケージ（モードA: 3端末） | `add CARLA bridge mode A: per-vehicle Android mapping` | ⬜ 未実装 |
-| 8 | CARLAMultiVehicleSimulator（モードB: 1端末） | `add CARLA bridge mode B: single device multi-vehicle simulation` | ⬜ 未実装 |
-| 9 | CARLABridge Pythonブリッジ | `add Python CARLA bridge for bidirectional simulation control` | ⬜ 未実装 |
+| 7 | SimBridge（SUMOシナリオ＋TraCIブリッジ） | `feat(Section7): SUMOシナリオとTraCIブリッジを追加` | ⬜ 未実装 |
+| 8 | Client: sim/ パッケージ（モードA: 3端末） | `feat(Section8): SUMO車両の位置でアプリを動かすモードAを追加` | ⬜ 未実装 |
+| 9 | VEHICLE_COMMANDによる双方向制御 | `feat(Section9): V2V情報に基づく車両制御をSUMOへ返す` | ⬜ 未実装 |
+| 10 | モードB（1端末で多数車両） | `feat(Section10): 1端末で多数車両を扱うモードBを追加` | ⬜ 未実装 |
 
 ---
 
-## 6. CARLAシミュレーション設計
+## 6. シミュレーション設計（SUMO）
 
-> **実装状況**: 本章は設計のみで，`carla/` パッケージ・CARLABridge は未実装（2026年9月時点）．
+> **実装状況**: 本章は設計のみで，`sim/` パッケージ・SimBridge は未実装（2026年9月時点）．
+> 当初はCARLAを想定していたが，下記の理由から**SUMOを主なシミュレータとし，3D表示などが必要になった段階でCARLAを追加する**方針に変更した．
 
-### 6.1 実験モード
+### 6.1 シミュレータの選定
+
+| 観点 | SUMO | CARLA |
+|------|------|-------|
+| 得意分野 | 道路網全体の交通流（多数車両・渋滞・信号） | 1台ごとの物理挙動・センサ・3D映像 |
+| 必要な計算機 | 一般的なPC | GPU搭載PC |
+| 車両台数 | 数百〜数千台 | 数十台程度 |
+| 地図 | OpenStreetMapから実在地域を変換可能 | 付属の街マップが中心 |
+| 外部制御 | TraCI（Python）で位置取得・速度変更 | Python API |
+| 評価指標の取得 | TTC・PET（SSM機能），燃料・排出量，待ち時間などを標準出力 | 多くを自前で算出 |
+
+本研究で必要なのは「多数車両での交差点グループ参加・離脱」「交通安全・効率への効果」「実在の交差点での評価」であり，いずれもSUMOの得意分野である．
+V2V情報は位置情報のP2P共有であり，センサ認識や3D映像は評価に不要なため，SUMOを主とする．
+CARLAはSUMOとの公式連携（co-simulation）があるため，デモ用の可視化などが必要になった時点で追加できる．
+
+### 6.2 実験モード
 
 | モード | Android台数 | P2P通信 | 主な評価対象 |
 |--------|------------|---------|-------------|
-| モードA（実機分散型） | 3台（各1台=1車両） | 実際のUDP通信 | 通信遅延・PDR・グループ参加離脱の正確性 |
-| モードB（単端末集約型） | 1台（全車両を仮想処理） | メモリ内疑似通信 | グループ参加離脱の正確性・交通への情報共有効果 |
+| モードA（実機分散型） | 3台（各1台=SUMO車両1台） | 実際のUDP通信 | 通信遅延・PDR・グループ参加離脱の正確性 |
+| モードB（単端末集約型） | 1台（全車両を仮想処理） | メモリ内疑似通信 | 多数車両でのグループ参加離脱の正確性・交通への情報共有効果 |
 
-### 6.2 双方向通信フロー
+### 6.3 構成と通信フロー
 
-- **CARLA → Android**: 各車両の位置・速度・進行方向を `CARLA_LOCATION` としてUDP送信（1秒ごと）
-- **Android → CARLA**: V2V情報共有に基づき生成した `VEHICLE_COMMAND` をCARLAへUDP返信
-- CARLAはTrafficManager APIで `VEHICLE_COMMAND` を受信し車速・ブレーキを直接制御
+```
+SUMO ──TraCI── SimBridge（Python） ──UDP── Android（sim/）── P2P ── 他のAndroid
+                     ↑                          │
+                     └──── VEHICLE_COMMAND ─────┘
+```
 
-### 6.3 VEHICLE_COMMAND の種類
+- **地図**: 実験エリアのOpenStreetMapデータを`netconvert`でSUMO道路網に変換する．`edge_servers.csv`の交差点と同じ地点を使う
+- **SUMO → Android**: SimBridgeが各車両の位置（`convertGeo`で緯度経度に変換）・速度・進行方向を `SIM_LOCATION` としてUDP送信（1秒ごと）．アプリはGPS・SIM走行の代わりにこの位置を使う
+- **Android → SUMO**: V2V情報共有に基づき生成した `VEHICLE_COMMAND` をSimBridgeへUDP送信し，TraCIで車両を制御する
+- **時間同期**: Android側は実時間で通信するため，SimBridgeはSUMOを実時間に合わせて1ステップずつ進める（ステップ長0.5〜1秒）
+- **ルート**: 対応するSUMO車両の目的地をアプリへ渡し，アプリ側のルート（OSRM）と一致させる
 
-| command | 内容 | トリガー |
-|---------|------|---------|
-| DECELERATE | 目標速度まで減速 | 前方急停止・渋滞情報の受信 |
-| RESUME | 通常速度に復帰 | 危険状況の解消 |
-| HOLD_SPEED | 現在速度を維持 | 前方渋滞継続中 |
+### 6.4 VEHICLE_COMMAND の種類
+
+| command | 内容 | トリガー | TraCIでの実現 |
+|---------|------|---------|--------------|
+| DECELERATE | 目標速度まで減速 | 前方急停止・渋滞情報の受信 | `vehicle.slowDown(id, 目標速度, 所要時間)` |
+| RESUME | 通常速度に復帰 | 危険状況の解消 | `vehicle.setSpeed(id, -1)` |
+| HOLD_SPEED | 現在速度を維持 | 前方渋滞継続中 | `vehicle.setSpeed(id, 現在速度)` |
+
+### 6.5 シナリオ設計の注意点
+
+- SUMOの標準の車両モデルは衝突しないよう安全側に動くため，そのままではヒヤリハットが発生しにくい．
+  運転のばらつき（`sigma`）・反応時間（`actionStepLength`）・安全確認の緩和（`speedMode`）や，前方車両の急停止イベントを設定し，**V2Vの有無で差が出る危険場面を含むシナリオ**を用意する
+- 同じシナリオ・同じ乱数シードで「V2Vあり」「V2Vなし」を実行して比較する
+
+### 6.6 評価指標とSUMO出力の対応
+
+| 指標 | SUMOでの取得方法 |
+|------|-----------------|
+| TTC・PET・ヒヤリハット | SSMデバイス（`--device.ssm.*`） |
+| 急制動回数・急停止連鎖台数 | FCD出力（全車両の位置・速度・加速度の時系列）から集計 |
+| 交差点スループット | 交差点手前・通過後の検知器（E1） |
+| 渋滞長・渋滞解消時間 | 区間検知器（E2）の渋滞長，FCD出力 |
+| 平均停止時間 | tripinfo出力の待ち時間 |
+| 燃料消費量 | 排出モデル（emissionsデバイス） |
+
+通信性能の指標（7.2）はAndroid・サーバ側のログで取得するため，シミュレータの種類に依存しない．
+
+### 6.7 構築の段階
+
+| 段階 | 内容 |
+|------|------|
+| 準備 | 実機3台・エッジサーバ3台でJOIN → P2P通信 → LEAVEを通しで確認 |
+| 1 | 実験エリアの地図をSUMO用に変換し，交通流（シナリオ）を作成 |
+| 2 | SimBridge（TraCI → UDP）と，受信した位置でアプリを動かす処理を作成 |
+| 3 | モードA：SUMO車両1台をスマホ1台に対応させ，実際の通信で動作確認 |
+| 4 | VEHICLE_COMMANDによる双方向制御 |
+| 5 | モードB：1台の端末で多数車両を処理 |
+| 6 | 評価（V2Vあり／なし，通常G-LocONとの比較）．評価用ログは段階3までに並行して用意する |
 
 ---
 
@@ -211,15 +267,15 @@ G-LocON_2026/
 
 ### 7.1 評価軸①：交通への影響（サービスの目的）
 
-V2Vあり vs V2Vなしを比較し，交通安全・効率への貢献を評価する．測定環境はCARLAシミュレーション．
+V2Vあり vs V2Vなしを比較し，交通安全・効率への貢献を評価する．測定環境はSUMOシミュレーション（取得方法は6.6）．
 
 #### 7.1.1 安全性指標
 
 | 指標 | 定義 | 測定方法 |
 |------|------|---------|
-| TTC（Time To Collision） | 現在の速度差・車間距離から算出する衝突予測時間 | CARLA上の車間距離・相対速度から算出 |
+| TTC（Time To Collision） | 現在の速度差・車間距離から算出する衝突予測時間 | SUMOのSSMデバイスが算出 |
 | PET（Post Encroachment Time） | 同一交差点空間を2台が通過した時間差 | 交差点通過タイムスタンプから算出 |
-| 急制動発生回数 | 閾値以上の減速度（例: -3m/s²）が発生した回数 | CARLAの加速度データから検出 |
+| 急制動発生回数 | 閾値以上の減速度（例: -3m/s²）が発生した回数 | SUMOのFCD出力（加速度）から検出 |
 | ヒヤリハット率 | TTC < 閾値（例: 3秒）となったイベント数 / 全交差点通過数 | TTC算出結果から集計 |
 | 急停止連鎖台数 | 急停止に連鎖して二次停止した車両数 | V2Vあり vs なしで比較 |
 
@@ -232,7 +288,7 @@ V2Vあり vs V2Vなしを比較し，交通安全・効率への貢献を評価�
 | 渋滞解消時間 | 渋滞発生から全車両が通常速度に戻るまでの時間（秒） |
 | 交通波の伝播速度 | 渋滞が上流へ伝播するスピード（V2Vで抑制できるか） |
 | 平均停止時間 | 走行中に速度がゼロになった累計時間の平均 |
-| 燃料消費量（推定） | CARLAの速度プロファイルから急加減速を抽出し推定 |
+| 燃料消費量（推定） | SUMOの排出モデルで算出 |
 
 ---
 
