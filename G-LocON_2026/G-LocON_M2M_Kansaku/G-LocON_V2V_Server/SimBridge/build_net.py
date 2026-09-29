@@ -1,12 +1,13 @@
-"""段階1-a: OpenStreetMap → SUMO道路網の変換と，交差点IDの対応付け.
+"""段階1-a: 対象エリア（正方形）の道路網を作り，エリア内の全交差点を洗い出す.
 
-使い方:
-    python build_net.py            # osm/area.osm → scenario/area.net.xml, intersection_map.csv
+    python build_net.py [--side 1000] [--center 35.9490,139.6485]
 
-出力する intersection_map.csv:
-    intersectionId, lat, lon, active, port, junctionId, distance_m
-    active=1 はエッジサーバが設置された交差点（edge_servers.csv の有効行）
+出力:
+    scenario/area.net.xml          正方形エリアで切り出したSUMO道路網（左側通行）
+    scenario/area_intersections.csv  エリア内の全交差点
+        intersectionId（アプリと同じ "緯度5桁_経度5桁"）, lat, lon, junctionId, degree
 """
+import argparse
 import csv
 import os
 import subprocess
@@ -15,7 +16,7 @@ import sys
 import common
 
 
-def convert():
+def convert(bbox):
     if not os.path.exists(common.OSM_FILE):
         sys.exit(f"{common.OSM_FILE} がありません（OpenStreetMapのデータを置いてください）")
     os.makedirs(common.SCENARIO_DIR, exist_ok=True)
@@ -25,51 +26,58 @@ def convert():
         "--osm-files", common.OSM_FILE,
         "--type-files", typemap + "," + os.path.join(common.HERE, "osm", "service_passenger.typ.xml"),
         "-o", common.NET_FILE,
-        # 車が走る道路だけを残す
+        # 正方形エリアで切り出す
+        "--keep-edges.in-geo-boundary", ",".join(f"{v:.6f}" for v in bbox),
+        # 車が走る道路だけを残し，つながっていない断片は捨てる
         "--keep-edges.by-vclass", "passenger",
-        "--remove-edges.isolated",
-        # 交差点・信号・ランプの整形
+        "--remove-edges.isolated", "--keep-edges.components", "1",
+        # 交差点・信号の整形
         "--geometry.remove", "--roundabouts.guess", "--ramps.guess",
         "--junctions.join", "--tls.guess-signals", "--tls.discard-simple", "--tls.join",
         "--osm.turn-lanes",
-        # 日本は左側通行
-        "--lefthand",
+        "--lefthand",                      # 日本は左側通行
         "--output.street-names", "--output.original-names",
         "--proj.utm",
         "--no-warnings",
     ]
-    print(" ".join(cmd))
     subprocess.run(cmd, check=True)
 
 
-def map_intersections():
+def extract_intersections():
+    """3方向以上に道がつながる地点を交差点とみなす."""
     net = common.load_net()
     rows = []
-    for iid, lat, lon, port, active in common.read_edge_servers(include_commented=True):
-        x, y = net.convertLonLat2XY(lon, lat)
-        best, best_d = None, 1e9
-        for node in net.getNodes():
-            if node.getType() in ("dead_end",):
-                continue
-            nx, ny = node.getCoord()
-            d = ((nx - x) ** 2 + (ny - y) ** 2) ** 0.5
-            if d < best_d:
-                best, best_d = node, d
-        rows.append([iid, lat, lon, int(active), port or "", best.getID() if best else "", round(best_d, 1)])
-    rows.sort(key=lambda r: (-r[3], r[0]))
-    with open(common.INTERSECTION_MAP, "w", newline="", encoding="utf-8") as f:
+    for node in net.getNodes():
+        if node.getType() in ("dead_end", "internal"):
+            continue
+        nbrs = {e.getFromNode().getID() for e in node.getIncoming()} | \
+               {e.getToNode().getID() for e in node.getOutgoing()}
+        nbrs.discard(node.getID())
+        if len(nbrs) < 3:
+            continue
+        x, y = node.getCoord()
+        lon, lat = net.convertXY2LonLat(x, y)
+        rows.append([common.intersection_id(lat, lon), round(lat, 6), round(lon, 6), node.getID(), len(nbrs)])
+    rows.sort()
+    with open(common.INTERSECTIONS_CSV, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["intersectionId", "lat", "lon", "active", "port", "junctionId", "distance_m"])
+        w.writerow(["intersectionId", "lat", "lon", "junctionId", "degree"])
         w.writerows(rows)
-    print(f"{common.INTERSECTION_MAP}: {len(rows)} 交差点")
-    for r in rows:
-        if r[3]:
-            print(f"  [ES] {r[0]} → junction {r[5]}  ({r[6]} m)")
-    far = [r for r in rows if r[6] > 20]
-    if far:
-        print(f"  注意: SUMOの交差点と20m以上離れているもの {len(far)} 件（地図の範囲外や道路の簡略化による）")
+    return rows
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--side", type=float, default=common.AREA_SIDE_M, help="正方形の一辺 [m]")
+    ap.add_argument("--center", default=None, help="中心の 緯度,経度（省略時は common.AREA_CENTER）")
+    a = ap.parse_args()
+    center = tuple(float(v) for v in a.center.split(",")) if a.center else None
+    bbox = common.area_bbox(center, a.side)
+    print(f"対象エリア: 経度 {bbox[0]:.5f}〜{bbox[2]:.5f}, 緯度 {bbox[1]:.5f}〜{bbox[3]:.5f}（一辺 {a.side:.0f} m）")
+    convert(bbox)
+    rows = extract_intersections()
+    print(f"エリア内の交差点: {len(rows)} か所 → {common.INTERSECTIONS_CSV}")
 
 
 if __name__ == "__main__":
-    convert()
-    map_intersections()
+    main()

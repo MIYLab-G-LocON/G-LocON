@@ -136,12 +136,8 @@ def main():
 
     with open(os.path.join(common.SCENARIO_DIR, "hazards.json"), encoding="utf-8") as f:
         hazards = json.load(f)
-    junctions, jids = {}, {}
-    with open(common.INTERSECTION_MAP, encoding="utf-8") as f:
-        for r in csv.DictReader(f):
-            if r["active"] == "1":
-                junctions[r["intersectionId"]] = traci.junction.getPosition(r["junctionId"])
-                jids[r["intersectionId"]] = r["junctionId"]
+    jids = common.read_sim_edge_servers()           # {intersectionId: junctionId}
+    junctions = {iid: traci.junction.getPosition(j) for iid, j in jids.items()}
     routes = RouteIndex(traci, common.load_net(), jids)
 
     gf = open(os.path.join(out, "group_log.csv"), "w", newline="", encoding="utf-8")

@@ -1,7 +1,7 @@
 <configuration>
     <input>
         <net-file value="area.net.xml"/>
-        <route-files value="main.rou.xml,background.rou.xml"/>
+        <route-files value="trips.rou.xml"/>
         <additional-files value="vtypes.add.xml"/>
     </input>
     <time><begin value="0"/><end value="1200"/><step-length value="0.5"/></time>

@@ -6,13 +6,18 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 OSM_FILE = os.path.join(HERE, "osm", "area.osm")
 SCENARIO_DIR = os.path.join(HERE, "scenario")
 NET_FILE = os.path.join(SCENARIO_DIR, "area.net.xml")
-INTERSECTION_MAP = os.path.join(SCENARIO_DIR, "intersection_map.csv")
-EDGE_SERVERS_CSV = os.path.normpath(os.path.join(HERE, "..", "MasterServer", "edge_servers.csv"))
+INTERSECTIONS_CSV = os.path.join(SCENARIO_DIR, "area_intersections.csv")   # エリア内の全交差点
+SIM_EDGE_SERVERS_CSV = os.path.join(SCENARIO_DIR, "edge_servers.csv")      # ランダムに選んだエッジサーバ
 OUT_DIR = os.path.join(HERE, "out")
 
-# アプリ側（OsrmRouteClient）と同じ始点・終点。実験ルートはこの2点を結ぶ
-ROUTE_START = (35.952087, 139.65523)   # (lat, lon)
-ROUTE_END = (35.949065, 139.640613)
+# 対象エリア（正方形）。中心と一辺の長さで指定する。
+# osm/area.osm の範囲（緯度35.9435〜35.9545，経度139.6380〜139.6590 ≒ 1.2km×1.9km）に収まること
+AREA_CENTER = (35.9490, 139.6485)   # (lat, lon)
+AREA_SIDE_M = 1000.0
+
+# エッジサーバのポート（EdgeServer は 1交差点1ポート）
+EDGE_SERVER_IP = "192.168.137.1"
+EDGE_SERVER_BASE_PORT = 55600
 
 # アプリ側の設定と揃える
 JOIN_ETA_SEC = 30.0      # τ: ETAがこれを下回るとJOIN
@@ -36,42 +41,35 @@ def sumo_bin(name):
     return os.path.join(sumo_home(), "bin", exe)
 
 
+def area_bbox(center=None, side_m=None):
+    """正方形エリアの (lon_min, lat_min, lon_max, lat_max)."""
+    import math
+    lat, lon = center or AREA_CENTER
+    half = (side_m or AREA_SIDE_M) / 2.0
+    dlat = half / 111_320.0
+    dlon = half / (111_320.0 * math.cos(math.radians(lat)))
+    return lon - dlon, lat - dlat, lon + dlon, lat + dlat
+
+
+def intersection_id(lat, lon):
+    """アプリ（OsrmRouteClient）と同じ "緯度5桁_経度5桁" 形式."""
+    return f"{lat:.5f}_{lon:.5f}"
+
+
+def read_sim_edge_servers():
+    """scenario/edge_servers.csv → {intersectionId: junctionId}."""
+    import csv
+    res = {}
+    with open(SIM_EDGE_SERVERS_CSV, encoding="utf-8") as f:
+        for line in f:
+            if line.startswith("#") or line.startswith("intersectionId") or not line.strip():
+                continue
+            iid, _ip, _port, jid = line.strip().split(",")[:4]
+            res[iid] = jid
+    return res
+
+
 def load_net():
     sumo_home()
     import sumolib
     return sumolib.net.readNet(NET_FILE, withInternal=False)
-
-
-def read_edge_servers(include_commented=True):
-    """edge_servers.csv から交差点を読む.
-
-    有効行（エッジサーバあり）に加え，コメントアウトされた OSRM 交差点も
-    include_commented=True なら返す（全ルート交差点との対応表を作るため）。
-    戻り値: [(intersectionId, lat, lon, port or None, active)]
-    """
-    rows = []
-    with open(EDGE_SERVERS_CSV, encoding="utf-8") as f:
-        for raw in f:
-            line = raw.strip()
-            if not line or line.startswith("intersectionId"):
-                continue
-            active = not line.startswith("#")
-            body = line.lstrip("#").strip()
-            parts = body.split(",")
-            if len(parts) < 3 or "_" not in parts[0]:
-                continue
-            try:
-                lat_s, lon_s = parts[0].split("_")
-                lat, lon = float(lat_s), float(lon_s)
-            except ValueError:
-                continue
-            if not active and not include_commented:
-                continue
-            port = parts[2].strip()
-            rows.append((parts[0], lat, lon, port if port.isdigit() else None, active))
-    # 同じIDの重複（_old 行など）は有効行を優先
-    uniq = {}
-    for r in rows:
-        if r[0] not in uniq or r[4]:
-            uniq[r[0]] = r
-    return list(uniq.values())
