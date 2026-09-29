@@ -501,7 +501,7 @@ def main():
         for k, iid in enumerate(sorted(common.read_sim_edge_servers())):
             x, y = traci.junction.getPosition(common.read_sim_edge_servers()[iid])
             col = PALETTE[k % len(PALETTE)] + (255,)
-            traci.poi.add(f"ES{k}", x, y, col, poiType="edgeServer", layer=-1, width=30, height=30)
+            traci.poi.add(f"ES{k}", x, y, col, poiType="edgeServer", layer=5, width=24, height=24)
     ef = open(os.path.join(a.out, "events.csv"), "w", newline="", encoding="utf-8")
     ew = csv.writer(ef)
     ew.writerow(["simTime", "wallTime", "event", "peer", "target", "detail"])
