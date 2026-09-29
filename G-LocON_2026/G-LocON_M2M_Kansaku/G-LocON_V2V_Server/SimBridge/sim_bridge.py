@@ -493,8 +493,15 @@ def main():
            "--no-step-log", "true", "--no-warnings", "true",
            "--tripinfo-output", os.path.join(a.out, "tripinfo.xml")]
     if a.gui:
-        cmd += ["--start", "--delay", "0"]
+        cmd += ["--start", "--quit-on-end", "--delay", "0", "--window-size", "1400,1000",
+                "--gui-settings-file", os.path.join(common.HERE, "gui_settings.xml")]
     traci.start(cmd)
+    if a.gui:
+        # エッジサーバのある交差点に，グループの色と同じ色の印（ES0〜）を置く
+        for k, iid in enumerate(sorted(common.read_sim_edge_servers())):
+            x, y = traci.junction.getPosition(common.read_sim_edge_servers()[iid])
+            col = PALETTE[k % len(PALETTE)] + (255,)
+            traci.poi.add(f"ES{k}", x, y, col, poiType="edgeServer", layer=-1, width=30, height=30)
     ef = open(os.path.join(a.out, "events.csv"), "w", newline="", encoding="utf-8")
     ew = csv.writer(ef)
     ew.writerow(["simTime", "wallTime", "event", "peer", "target", "detail"])

@@ -8,6 +8,7 @@ Ctrl+C で全プロセスを終了する。ログは out/servers/ に保存す�
 """
 import argparse
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -56,6 +57,10 @@ def main():
     if dead:
         print("起動に失敗したもの: " + ", ".join(dead) + "（ログを確認してください）")
     print("Ctrl+C で全て終了します")
+
+    def on_term(*_):
+        raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM, on_term)   # 終了要求（kill など）でも子プロセスを残さない
     try:
         while True:
             time.sleep(1)

@@ -458,6 +458,21 @@ EdgeServerは交差点1つにつき1プロセス起動する．起動する交�
 
 ---
 
+### 8.2 SUMOモードでの起動手順（SimBridge）
+
+SUMOと実時間でつないで実験する場合は，上記の個別起動の代わりに `G-LocON_V2V_Server/SimBridge/` のスクリプトを使う．
+詳しい準備・引数・出力は [SimBridge/README.md](G-LocON_V2V_Server/SimBridge/README.md) を参照．
+
+```
+cd G-LocON_V2V_Server/SimBridge
+python start_servers.py --stun                        # STUN・MasterServer・全エッジサーバを一括起動（別ウィンドウで）
+python sim_bridge.py --phones 3                       # モードA: 実機3台
+python sim_bridge.py --phones 1 --virtual --gui       # モードB: 仮想クライアント＋実機1台（sumo-guiで色分け表示）
+python sim_bridge.py --phones 0 --virtual --gui --local   # 実機なし・PCだけで試す
+```
+
+スマホではアプリの「開始」→「SUMO」を押す．「表示」ボタンで他車両を「全て／実機のみ／なし」に切り替える．
+
 ---
 
 ## 9. トラブルシューティング

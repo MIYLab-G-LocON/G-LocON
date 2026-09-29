@@ -1,0 +1,11 @@
+<!-- sim_bridge.py --gui のときの sumo-gui 表示設定（車を大きめに，色は SimBridge が付けた色を使う） -->
+<viewsettings>
+    <scheme name="G-LocON">
+        <background backgroundColor="white" showGrid="0"/>
+        <edges laneEdgeMode="0" laneShowBorders="1" showLinkDecals="0" showRails="0" hideConnectors="1"/>
+        <vehicles vehicleMode="0" vehicleQuality="0" vehicle_minSize="1" vehicle_exaggeration="12" showBlinker="0"/>
+        <junctions junctionMode="0" drawShape="1"/>
+        <pois poi_minSize="1" poi_exaggeration="1" poiName_show="1" poiName_size="60"/>
+    </scheme>
+    <delay value="0"/>
+</viewsettings>
