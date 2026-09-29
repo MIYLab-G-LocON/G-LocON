@@ -67,7 +67,7 @@ G-LocON_2026/
 | `map/` | 拡張 | MapManager（ルート・交差点マーカー表示追加） |
 | `navigation/` | **★新規追加** | OSRM通信・ETA計算・IntersectionManager |
 | `intersection/` | **★新規追加** | EdgeServerClient・JOIN/LEAVE通信 |
-| `sim/` | **★新規追加（未実装）** | 交通シミュレータ（SUMO）連携：SimBridgeから受け取った位置でアプリを動かす（モードA/B） |
+| `sim/` | **★新規追加** | SUMOモード：SimBridgeから割り当てられた車両のルート・位置でアプリを動かす（SimBridgeClient） |
 
 ### 2.3 G-LocON_V2V_Server モジュール構成
 
@@ -78,7 +78,7 @@ G-LocON_2026/
 | `MasterServer/` | **★新規** | 交差点ID → エッジサーバAddr配布 | 55556 |
 | `EdgeServer/` | **★新規** | 交差点V2Vグループ管理（交差点ごとに1プロセス） | 556XX |
 | `VirtualClient/` | 拡張（動作確認用） | V2Vシナリオのシミュレーション | - |
-| `SimBridge/` | **★新規（未実装）** | SUMO（TraCI）とAndroidを繋ぐPythonブリッジ．シナリオ（道路網・交通流）もここに置く | 55700（予定） |
+| `SimBridge/` | **★新規** | SUMO（TraCI）とAndroid・サーバを繋ぐPythonブリッジ．シナリオ作成，仮想クライアント，サーバ一括起動も含む | 55700 |
 
 ---
 
@@ -146,8 +146,12 @@ G-LocON_2026/
 | peerLeft | EdgeServer | Client（残りの車両） | 他の車両がLEAVEしたことの通知．受け取った車両はその交差点グループのメンバーから外す |
 | NATRegisterDstAddrPort | Client | 他車両 | NATに穴を開けるパケット |
 | SendLocation | Client | 他車両 | P2P直接通信（位置情報送信） |
-| SIM_LOCATION | SimBridge | Client | シミュレータ車両の位置・速度・進行方向（未実装） |
 | VEHICLE_COMMAND | Client | SimBridge | シミュレータ車両への行動指令（減速・復帰など）（未実装） |
+| SIM_HELLO / SIM_ROUTE_REQ / SIM_BYE | Client（SUMOモード） | SimBridge | 車両の割り当て要求／ルート再送要求／終了 |
+| SIM_ROUTE | SimBridge | Client（SUMOモード） | 割り当てた車両のルート上の交差点列（OSRMの結果の代わり） |
+| SIM_LOCATION | SimBridge | Client（SUMOモード） | 割り当てた車両の位置・速度・進行方向（1秒ごと，GPSの代わり） |
+| SIM_END | SimBridge | Client（SUMOモード） | 車両が目的地に到着（次の車両を割り当てる） |
+| peerLeft | EdgeServer | 仮想クライアント | 実機と同じく離脱通知を受け取る（仮想クライアントも同じプロトコルを使う） |
 
 ### 4.2 ポート設計
 
@@ -175,15 +179,16 @@ G-LocON_2026/
 | 5 | AppController変更（V2Vロジック統合） | `extend AppController with V2V join/leave logic` | ✅ 実装済み |
 | 6 | MapManager・MainActivity変更（UI） | `extend UI: route display and intersection group status` | ✅ 実装済み |
 | 7 | SimBridge（SUMOシナリオ＋TraCIブリッジ） | `feat(Section7): SUMOシナリオとTraCIブリッジを追加` | ⬜ 未実装 |
-| 8 | Client: sim/ パッケージ（モードA: 3端末） | `feat(Section8): SUMO車両の位置でアプリを動かすモードAを追加` | ⬜ 未実装 |
+| 8 | SimBridge（実時間ブリッジ・仮想クライアント）＋ Client: sim/ パッケージ（SUMOモード・表示切り替え） | `feat(Section8): SUMOモードと仮想クライアントを追加` | ✅ 実装済み（実機での確認待ち） |
 | 9 | VEHICLE_COMMANDによる双方向制御 | `feat(Section9): V2V情報に基づく車両制御をSUMOへ返す` | ⬜ 未実装 |
-| 10 | モードB（1端末で多数車両） | `feat(Section10): 1端末で多数車両を扱うモードBを追加` | ⬜ 未実装 |
+| 10 | 評価用ログの拡充（P2P確立時刻・AoI・パケット） | `feat(Section10): 評価用ログを追加` | ⬜ 未実装 |
 
 ---
 
 ## 6. シミュレーション設計（SUMO）
 
-> **実装状況**: SimBridge の段階1（エリア・エッジサーバ配置・シナリオ・V2Vなし／理想V2Vの実行と集計）は実装済み．アプリとつなぐ段階2以降（`sim/` パッケージ）は未実装（2026年9月時点）．
+> **実装状況**: SimBridge の段階1（エリア・エッジサーバ配置・シナリオ・V2Vなし／理想V2Vの実行と集計）と，段階2（実時間ブリッジ・仮想クライアント・アプリのSUMOモード）は実装済み．
+> 段階2はPC上の試験（MasterServer・エッジサーバ10台・仮想クライアント・模擬端末）で動作を確認済みで，実機での確認は未実施（2026年9月時点）．VEHICLE_COMMAND は未実装．
 > 当初はCARLAを想定していたが，下記の理由から**SUMOを主なシミュレータとし，3D表示などが必要になった段階でCARLAを追加する**方針に変更した．
 
 ### 6.1 シミュレータの選定
@@ -203,28 +208,48 @@ CARLAはSUMOとの公式連携（co-simulation）があるため，デモ用の�
 
 ### 6.2 実験モード
 
-| モード | Android台数 | P2P通信 | 主な評価対象 |
-|--------|------------|---------|-------------|
-| モードA（実機分散型） | 3台（各1台=SUMO車両1台） | 実際のUDP通信 | 通信遅延・PDR・グループ参加離脱の正確性 |
-| モードB（単端末集約型） | 1台（全車両を仮想処理） | メモリ内疑似通信 | 多数車両でのグループ参加離脱の正確性・交通への情報共有効果 |
+アプリには従来の**実機モード**（目的地入力 → OSRMでルート取得 → ルート上の交差点をMasterServerに問い合わせ → GPS/SIM走行）を残したまま，
+**SUMOモード**を追加する．SUMOモードでは，SimBridge が SUMO の車両1台を端末に割り当て，その車のルート（交差点列）と位置を送る．
+アプリはそれを OSRM・GPS の代わりに使うだけで，MasterServer への問い合わせ・ETAによるJOIN/LEAVE・P2P通信は実機モードと同じ処理を行う．
+
+| モード | 実機 | SUMOの他の車両 | 主な目的 |
+|--------|------|---------------|---------|
+| モードA（実機通信） | 3台（各1台=SUMO車両1台に乗る） | 走行のみ（サーバには参加しない） | 本物のP2P通信の性能（遅延・PDR・NAT越え），実機どうしが偶然同じグループに入ったときの動作 |
+| モードB（多数車両） | 1台（SUMO車両1台に乗り，画面で目視確認） | **全車両が仮想クライアントとしてエッジサーバに実際にJOIN/LEAVE** | 多数車両でのグルーピング・サーバ処理の正しさと負荷 |
+
+- 2つのモードは同じ仕組みで，SimBridge の設定（受け付ける実機の台数 `--phones`，仮想クライアントの有無 `--virtual`）だけが異なる
+- **仮想クライアント**: SUMOの車両1台ごとに専用のUDPソケットを持ち，アプリと同じ手順・同じ形式で
+  MasterServerへの問い合わせ，ETA<30秒でJOIN，30m離れて遠ざかったらLEAVE，15秒ごとのKEEPALIVE を行う．
+  エッジサーバからは実機と区別がつかない．グループ内の実機へは位置（SendLocation）も送るため，実機の地図に仮想車両が表示される（peerID は `sim-<車両ID>`）
+- **表示の切り替え**: アプリの「表示」ボタンで，他車両を「全て／実機のみ／なし」に切り替える．実機は赤・緑，仮想車両は半透明の灰色のピン
+- **PC画面での確認**: `sim_bridge.py --gui` で sumo-gui を表示し，車両をグループ（交差点）ごとに色分けする（実機が乗っている車は紫，未参加は灰色）
+- **自動検証**: SimBridge は，各仮想クライアントがエッジサーバから受け取ったグループ一覧と，実際にその交差点にJOIN中の車両を毎秒比較し，
+  一覧の一致率・JOIN応答時間などを記録する（評価指標「①システム」）
+- 実機なし・PCだけでもモードBを動かせる（`--phones 0 --virtual --local`）
 
 ### 6.3 構成と通信フロー
 
 ```
-SUMO ──TraCI── SimBridge（Python） ──UDP── Android（sim/）── P2P ── 他のAndroid
-                     ↑                          │
-                     └──── VEHICLE_COMMAND ─────┘
+                        SIM_ROUTE / SIM_LOCATION / SIM_END
+SUMO ──TraCI── SimBridge ─────────────────────────────────▶ Android（SUMOモード）── P2P ──┐
+  (sumo-gui)       │                                              │ JOIN/LEAVE             │
+                   │  仮想クライアント×車両数（モードB）             ▼                        │
+                   └──── INTERSECTION_QUERY / JOIN / LEAVE ──▶ MasterServer・EdgeServer    │
+                         ◀── メンバー一覧・新規参加・離脱通知 ──                           │
+                         ── SendLocation（実機へ）────────────────────────────────────────┘
 ```
 
 - **地図とエッジサーバ**: 実験エリアのOpenStreetMapデータから**正方形のエリア**（既定1km四方）を切り出してSUMO道路網に変換し，
   エリア内の**全交差点**（3方向以上に道がつながる地点）を洗い出す．その中から**ランダムにエッジサーバを選ぶ**（数・乱数シード・最小間隔を指定可能）．
-  選んだ結果は MasterServer の `edge_servers.csv` と同じ形式で出力する
+  選んだ結果は MasterServer の `edge_servers.csv` と同じ形式で出力し，`start_servers.py` で MasterServer と全エッジサーバを一括起動する
 - **交通**: 車両はエリア内のランダムな出発地→目的地を自由に走り，自分のルートが通るエッジサーバ交差点のグループに参加・離脱する
-- **SUMO → Android**: SimBridgeが各車両の位置（`convertGeo`で緯度経度に変換）・速度・進行方向を `SIM_LOCATION` としてUDP送信（1秒ごと）．アプリはGPS・SIM走行の代わりにこの位置を使う
-- **Android → SUMO**: V2V情報共有に基づき生成した `VEHICLE_COMMAND` をSimBridgeへUDP送信し，TraCIで車両を制御する
-- **時間同期**: Android側は実時間で通信するため，SimBridgeはSUMOを実時間に合わせて1ステップずつ進める（ステップ長0.5〜1秒）
-- **ルート**: 対応するSUMO車両の目的地をアプリへ渡し，アプリ側のルート（OSRM）と一致させる．
-  アプリは現在1ルート分の交差点しか扱わないため，エリア内の任意のルートに対応させる（ルート上の交差点をMasterServerに問い合わせる現在の仕組みはそのまま使える）
+- **ルート（進行先の交差点）**: 自由に走る車は目的地入力もOSRMも使わないため，SimBridge が**その車のSUMO上のルートが通る交差点の列**を `SIM_ROUTE` で送る．
+  交差点IDはエリア内の全交差点と同じ「緯度5桁_経度5桁」で，エッジサーバ一覧と完全に一致する．アプリはこれを OSRM の結果と同じ入口に渡すため，
+  「ルート → 交差点リスト → MasterServerでエッジサーバ取得 → ETAでJOIN」の流れはそのまま使える
+- **位置**: SimBridge が割り当てた車両の位置（緯度経度）・速度・進行方向を `SIM_LOCATION` で1秒ごとに送る．アプリはGPS・SIM走行の代わりにこの位置を使い，P2Pでも送る
+- **乗り換え**: 車が目的地に着くと `SIM_END` を送り，アプリはJOIN中の交差点から離脱する．SimBridge は次に出発する車を割り当てる（実験中ずっとどこかの車として参加し続ける）
+- **時間同期**: Android側は実時間で通信するため，SimBridgeはSUMOを実時間に合わせて0.5秒ずつ進める（`--speed` で動作確認用に速くできる）
+- **Android → SUMO（予定）**: V2V情報共有に基づき生成した `VEHICLE_COMMAND` をSimBridgeへUDP送信し，TraCIで車両を制御する
 
 ### 6.4 VEHICLE_COMMAND の種類
 
@@ -259,10 +284,10 @@ SUMO ──TraCI── SimBridge（Python） ──UDP── Android（sim/）�
 |------|------|
 | 準備 | 実機3台・エッジサーバ3台でJOIN → P2P通信 → LEAVEを通しで確認 |
 | 1 | 正方形エリアの地図をSUMO用に変換し，全交差点からエッジサーバをランダムに配置，エリア内を自由に走る交通流（シナリオ）を作成 ✅ |
-| 2 | SimBridge（TraCI → UDP）と，受信した位置でアプリを動かす処理を作成 |
+| 2 | SimBridge（実時間ブリッジ・仮想クライアント・サーバ一括起動）とアプリのSUMOモード ✅（PC上の試験で確認済み．実機での確認待ち） |
 | 3 | モードA：SUMO車両1台をスマホ1台に対応させ，実際の通信で動作確認 |
 | 4 | VEHICLE_COMMANDによる双方向制御 |
-| 5 | モードB：1台の端末で多数車両を処理 |
+| 5 | モードB：全車両を仮想クライアントとしてエッジサーバに参加させ，実機1台で目視確認 |
 | 6 | 評価（V2Vあり／なし，通常G-LocONとの比較）．評価用ログは段階3までに並行して用意する |
 
 ---

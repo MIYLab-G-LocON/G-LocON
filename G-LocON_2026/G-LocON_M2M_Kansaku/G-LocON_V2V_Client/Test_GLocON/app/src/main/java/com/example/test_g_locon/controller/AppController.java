@@ -17,6 +17,7 @@ import com.example.test_g_locon.navigation.Intersection;
 import com.example.test_g_locon.navigation.IntersectionManager;
 import com.example.test_g_locon.navigation.MasterServerClient;
 import com.example.test_g_locon.navigation.OsrmRouteClient;
+import com.example.test_g_locon.sim.SimBridgeClient;
 
 import android.location.LocationListener;
 import android.os.Bundle;
@@ -145,6 +146,11 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
     private static final double SIM_SPEED_MPS = 10.0;
     /** 仮想走行の位置更新間隔（ミリ秒） */
     private static final long SIM_INTERVAL_MS = 1000;
+
+    // ---- SUMOモード ----
+    /** PC上の SimBridge（SimBridge/sim_bridge.py）の待ち受けポート */
+    public static final int SIM_BRIDGE_PORT = 55700;
+    private SimBridgeClient simBridge = null;
 
     /**
      * @param context          Activity の Context
@@ -452,6 +458,10 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
             edgeServerClient.shutdown();
             edgeServerClient = null;
         }
+        if (simBridge != null) {
+            simBridge.stop();
+            simBridge = null;
+        }
         intersectionManager.close();
         routeExecutor.shutdown();
         stopSimulation();
@@ -481,28 +491,116 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
                 return;
             }
 
-            // ② IntersectionManagerに交差点リストをセット（ETA/LEAVE判定開始）
-            intersectionManager.setIntersections(intersections);
-
-            // ③ UIへルート表示を通知
-            callback.onRouteLoaded(intersections);
-
-            // ④ MasterServerへ交差点IDリストを問い合わせ，エッジサーバAddrを取得
-            MasterServerClient masterClient = new MasterServerClient(
-                    MASTER_SERVER_IP, MASTER_SERVER_PORT,
-                    myUserInfo.getPublicIP(), myUserInfo.getPublicPort(),
-                    intersections,
-                    updatedIntersections -> {
-                        // エッジサーバAddr確定後，IntersectionManagerを更新
-                        intersectionManager.setIntersections(updatedIntersections);
-                        System.out.println("setDestination: エッジサーバAddr確定 "
-                                + updatedIntersections.size() + "件");
-                        // 交差点マーカーを再描画（EdgeServer有無が確定した後）
-                        callback.onRouteLoaded(updatedIntersections);
-                    }
-            );
-            masterClient.run(); // routeExecutorのスレッド内で同期実行
+            loadRoute(intersections);
         });
+    }
+
+    /**
+     * ルート上の交差点リストをセットし，MasterServerからエッジサーバAddrを取得する。
+     * 実機モード（OSRM）とSUMOモード（SimBridge）で共通の処理。routeExecutor 上で呼ぶこと。
+     */
+    private void loadRoute(List<Intersection> intersections) {
+        // ② IntersectionManagerに交差点リストをセット（ETA/LEAVE判定開始）
+        intersectionManager.setIntersections(intersections);
+
+        // ③ UIへルート表示を通知
+        callback.onRouteLoaded(intersections);
+
+        // ④ MasterServerへ交差点IDリストを問い合わせ，エッジサーバAddrを取得
+        MasterServerClient masterClient = new MasterServerClient(
+                MASTER_SERVER_IP, MASTER_SERVER_PORT,
+                myUserInfo.getPublicIP(), myUserInfo.getPublicPort(),
+                intersections,
+                updatedIntersections -> {
+                    // エッジサーバAddr確定後，IntersectionManagerを更新
+                    intersectionManager.setIntersections(updatedIntersections);
+                    System.out.println("loadRoute: エッジサーバAddr確定 "
+                            + updatedIntersections.size() + "件");
+                    // 交差点マーカーを再描画（EdgeServer有無が確定した後）
+                    callback.onRouteLoaded(updatedIntersections);
+                }
+        );
+        masterClient.run(); // routeExecutorのスレッド内で同期実行
+    }
+
+    /**
+     * GPS以外から与えられた位置（SIM走行・SUMO）で自車の状態を更新する。
+     * JOIN/LEAVE判定に加え，P2Pで周囲の車へ位置を送る（GPS更新時と同じ扱い）。
+     *
+     * @param speedMps 速度 [m/s]
+     * @param bearing  進行方向（北=0の時計回り）
+     */
+    private void applyExternalLocation(double lat, double lng, double speedMps, double bearing) {
+        currentLocation.setLatitude(lat);
+        currentLocation.setLongitude(lng);
+        myUserInfo.setLatitude(lat);
+        myUserInfo.setLongitude(lng);
+        myUserInfo.setSpeed(speedMps * 3.6);   // UserInfo の速度は km/h
+
+        callback.onSimulationLocationUpdated(lat, lng, bearing);
+        intersectionManager.update(lat, lng, speedMps);
+
+        if (natTravel == NAT_TRAVEL_OK && p2p != null) {
+            p2p.setMyUserInfo(myUserInfo);
+            totalGeoUpdateCount++;
+            p2p.sendLocation(totalGeoUpdateCount);
+        }
+    }
+
+    // =========================================================
+    // SUMOモード
+    // =========================================================
+
+    /**
+     * SUMOモードを開始する。PC上の SimBridge に接続し，割り当てられたSUMO車両の
+     * ルートと位置で走行する（GPS・OSRMは使わない）。開始ボタンで通信を始めた後に呼ぶこと。
+     *
+     * @param bridgeIp SimBridge を動かしているPCのIP（PCホットスポットなら 192.168.137.1）
+     */
+    public boolean startSumoMode(String bridgeIp) {
+        if (p2p == null || edgeServerClient == null) return false;
+        if (simBridge != null) return true;
+        stopSimulation();
+        useVirtualPosition = true;              // GPS更新で位置を上書きしない
+        simBridge = new SimBridgeClient(bridgeIp, SIM_BRIDGE_PORT, myUserInfo.getPeerId(),
+                new SimBridgeClient.Listener() {
+                    @Override
+                    public void onSimRoute(String vehicleId, List<Intersection> intersections) {
+                        routeExecutor.submit(() -> {
+                            leaveAllIntersections();
+                            loadRoute(intersections);
+                        });
+                        callback.onSumoStatus("SUMO車両 " + vehicleId + " に乗車（交差点 " + intersections.size() + "）");
+                    }
+
+                    @Override
+                    public void onSimLocation(double lat, double lng, double speedMps, double bearing) {
+                        applyExternalLocation(lat, lng, speedMps, bearing);
+                    }
+
+                    @Override
+                    public void onSimEnd(String vehicleId) {
+                        routeExecutor.submit(() -> leaveAllIntersections());
+                        callback.onSumoStatus("SUMO車両 " + vehicleId + " が到着。次の車を待っています");
+                    }
+                });
+        new Thread(simBridge, "SimBridgeClient").start();
+        return true;
+    }
+
+    public boolean isSumoMode() {
+        return simBridge != null;
+    }
+
+    /** JOIN中の交差点からすべて離脱する（SUMO車両の乗り換え・到着時） */
+    private void leaveAllIntersections() {
+        for (Intersection i : intersectionManager.getIntersections()) {
+            if (i.isJoined()) {
+                i.setJoined(false);
+                i.setHasJoinedAndLeft(true);
+                if (edgeServerClient != null) edgeServerClient.leave(i);
+            }
+        }
     }
 
     // =========================================================
@@ -565,8 +663,14 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
             System.out.println("仮想走行[" + simIndex + "/" + simPath.size()
                     + "]: lat=" + lat + " lng=" + lng);
 
-            callback.onSimulationLocationUpdated(lat, lng);
-            intersectionManager.update(lat, lng, SIM_SPEED_MPS);
+            double bearing = 0;
+            if (simIndex > 0) {
+                bearing = new HeadUp(simPath.get(simIndex - 1)[0], simPath.get(simIndex - 1)[1], lat, lng)
+                        .getNowAngle();
+            }
+            // [変更] 以前は地図とJOIN判定だけを更新し，P2PではGPSの位置を送っていた。
+            //        SIM の位置を自車の位置として扱い，P2Pでも送るようにした
+            applyExternalLocation(lat, lng, SIM_SPEED_MPS, bearing);
             simIndex++;
         }, 0, SIM_INTERVAL_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
 

@@ -103,6 +103,49 @@ public class MapManager {
 
     private OnMarkerTapListener markerTapListener;
 
+    // ---- 他車両の表示モード（SUMOモード用） ----
+    /** 実機・仮想車両をすべて表示 */
+    public static final int DISPLAY_ALL = 0;
+    /** 実機（P2Pでつながった本物の端末）だけ表示 */
+    public static final int DISPLAY_REAL_ONLY = 1;
+    /** 他車両を表示しない */
+    public static final int DISPLAY_NONE = 2;
+    /** SimBridge の仮想クライアントの peerID の接頭辞 */
+    public static final String VIRTUAL_PREFIX = "sim-";
+    private volatile int displayMode = DISPLAY_ALL;
+
+    public static boolean isVirtual(String peerId) {
+        return peerId != null && peerId.startsWith(VIRTUAL_PREFIX);
+    }
+
+    private boolean isVisible(String peerId) {
+        if (displayMode == DISPLAY_NONE) return false;
+        if (displayMode == DISPLAY_REAL_ONLY) return !isVirtual(peerId);
+        return true;
+    }
+
+    /** 表示モードを切り替える。非表示になった車両のピンはすぐに消す */
+    public void setDisplayMode(int mode) {
+        displayMode = mode;
+        final List<MarkerInfo> toRemove = new ArrayList<>();
+        synchronized (markerList) {
+            for (MarkerInfo info : markerList) {
+                if (!isVisible(info.getPeerId())) toRemove.add(info);
+            }
+            markerList.removeAll(toRemove);
+        }
+        uiHandler.post(() -> {
+            for (MarkerInfo info : toRemove) mapView.getOverlays().remove(info.getMarker());
+            mapView.invalidate();
+        });
+    }
+
+    /** 仮想車両は速度に関係なく半透明の灰色，実機は速度差で赤／緑 */
+    private int markerColor(UserInfo userInfo, double mySpeed) {
+        if (isVirtual(userInfo.getPeerId())) return Color.argb(170, 110, 110, 110);
+        return (userInfo.getSpeed() - mySpeed) > TOLERANCE_SPEED ? Color.RED : Color.GREEN;
+    }
+
     public MapManager(Context context, MapView mapView) {
         this.context = context;
         this.mapView = mapView;
@@ -199,6 +242,8 @@ public class MapManager {
      * @param mySpeed       自端末の速度 (km/h)。マーカ色の判定に使用
      */
     public void addOrUpdateMarker(final UserInfo userInfo, final double mySpeed) {
+        if (!isVisible(userInfo.getPeerId())) return;   // 表示モードで非表示の車両
+        final int color = markerColor(userInfo, mySpeed);
         // 他スレッドでマーカ追加中の場合は完了を待つ
         // [変更] Thread.sleep(100) のビジーウェイト → AtomicBoolean で安全に待機
         waitForMarkerReady();
@@ -207,13 +252,11 @@ public class MapManager {
         synchronized (markerList) {
             for (int i = 0; i < markerList.size(); i++) {
                 if (markerList.get(i).getPeerId().equals(userInfo.getPeerId())) {
-                    final int idx = i;
-                    final boolean isFaster = (userInfo.getSpeed() - mySpeed) > TOLERANCE_SPEED;
+                    final Marker target = markerList.get(i).getMarker();
                     uiHandler.post(() -> {
-                        markerList.get(idx).getMarker().setPosition(
+                        target.setPosition(
                                 new GeoPoint(userInfo.getLatitude(), userInfo.getLongitude()));
-                        markerList.get(idx).getMarker().setIcon(
-                                createColoredMarkerIcon(isFaster ? Color.RED : Color.GREEN));
+                        target.setIcon(createColoredMarkerIcon(color));
                         mapView.invalidate();
                     });
                     return;
@@ -226,7 +269,7 @@ public class MapManager {
         uiHandler.post(() -> {
             Marker marker = new Marker(mapView);
             marker.setPosition(new GeoPoint(userInfo.getLatitude(), userInfo.getLongitude()));
-            marker.setIcon(createColoredMarkerIcon(Color.GREEN));
+            marker.setIcon(createColoredMarkerIcon(color));
             marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM);
 
             // マーカタップ時のコールバック設定

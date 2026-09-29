@@ -67,6 +67,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private MaterialButton routeButton;   // ルート設定ボタン
     private MaterialButton simButton;    // 仮想走行ボタン
     private MaterialButton virtPosButton; // 仮想位置ボタン
+    private MaterialButton sumoButton;    // SUMOモード開始ボタン
+    private MaterialButton displayButton; // 他車両の表示モード切り替え
+    private int displayMode = MapManager.DISPLAY_ALL;
     private MaterialCardView inputCard;   // peerId入力カード（開始後に非表示）
     private MaterialCardView routeCard;  // 目的地入力カード（開始後に表示）
     private MapView mapView;
@@ -145,6 +148,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
         simButton     = findViewById(R.id.simButton);
         virtPosButton = findViewById(R.id.virtPosButton);
+        sumoButton    = findViewById(R.id.sumoButton);
+        displayButton = findViewById(R.id.displayButton);
+        sumoButton.setOnClickListener(this);
+        displayButton.setOnClickListener(this);
 
         start.setOnClickListener(this);
         end.setOnClickListener(this);
@@ -329,6 +336,29 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 simButton.setText("SIM停止");
             }
 
+        } else if (id == R.id.sumoButton) {
+            // SUMOモード: PC上の SimBridge から割り当てられたSUMO車両として走行する
+            if (appController.isSumoMode()) {
+                showToast("SUMOモード実行中です");
+            } else if (appController.startSumoMode(SERVER_IP)) {
+                appController.stopSimulation();
+                simButton.setText("SIM");
+                routeCard.setVisibility(View.GONE);
+                sumoButton.setText("SUMO中");
+                cameraLevel = 17.0f;
+                mapView.getController().setZoom((double) cameraLevel);
+                showToast("SimBridge に接続中...（PCで sim_bridge.py を起動しておくこと）");
+            } else {
+                showToast("先に「開始」で通信を始めてください");
+            }
+
+        } else if (id == R.id.displayButton) {
+            // 他車両の表示: 全て → 実機のみ → なし → 全て
+            displayMode = (displayMode + 1) % 3;
+            mapManager.setDisplayMode(displayMode);
+            displayButton.setText(displayMode == MapManager.DISPLAY_ALL ? "表示:全"
+                    : displayMode == MapManager.DISPLAY_REAL_ONLY ? "表示:実機" : "表示:なし");
+
         } else if (id == R.id.angle) {
             // [変更] ボタンテキストを短く「H↑」「N↑」に変更（旧: "HEADUP" / "NORTHUP"）
             if (cameraMode.equals(HEAD_UP)) {
@@ -389,11 +419,17 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     }
 
     @Override
-    public void onSimulationLocationUpdated(double lat, double lng) {
+    public void onSimulationLocationUpdated(double lat, double lng, double bearing) {
         runOnUiThread(() -> {
+            if (cameraMode.equals(HEAD_UP)) nowCameraAngle = (float) bearing;
             mapManager.updateCamera(lat, lng, cameraLevel, nowCameraAngle, searchRange);
-            mapManager.updateMyLocation(lat, lng, 0f);
+            mapManager.updateMyLocation(lat, lng, (float) bearing);
         });
+    }
+
+    @Override
+    public void onSumoStatus(String message) {
+        showToast(message);
     }
 
     // =========================================================

@@ -43,10 +43,13 @@ public class P2PReceiver implements Runnable {
     @Override
     public void run() {
         Log.d(TAG, "P2PReceiver 起動");
-        DatagramPacket receivePacket = new DatagramPacket(new byte[1024], 1024);
+        // [SUMO] 交差点グループのメンバー一覧は1台あたり約200バイト。1024バイトでは5台程度で
+        //        切れてJSON解析に失敗するため，UDPの最大長まで受けられるようにする
+        DatagramPacket receivePacket = new DatagramPacket(new byte[65507], 65507);
 
         while (!Thread.currentThread().isInterrupted()) {
             try {
+                receivePacket.setLength(receivePacket.getData().length);
                 socket.receive(receivePacket);
             } catch (IOException e) {
                 Log.d(TAG, "受信エラー: " + e);

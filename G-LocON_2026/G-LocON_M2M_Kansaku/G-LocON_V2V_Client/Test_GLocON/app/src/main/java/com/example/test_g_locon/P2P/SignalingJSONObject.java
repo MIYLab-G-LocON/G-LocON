@@ -73,6 +73,10 @@ public class SignalingJSONObject {
             srcUser.setPublicPort(jsonObject.getInt("publicPort"));
             srcUser.setPrivateIP(jsonObject.getString("privateIP"));
             srcUser.setPrivatePort(jsonObject.getInt("privatePort"));
+            // EdgeServer の新規参加通知には peerID・位置も含まれる（地図表示・一覧の照合に使う）
+            if (jsonObject.has("peerID"))    srcUser.setPeerId(jsonObject.getString("peerID"));
+            if (jsonObject.has("latitude"))  srcUser.setLatitude(jsonObject.getDouble("latitude"));
+            if (jsonObject.has("longitude")) srcUser.setLongitude(jsonObject.getDouble("longitude"));
         } catch (JSONException e) {
             e.printStackTrace();
         }

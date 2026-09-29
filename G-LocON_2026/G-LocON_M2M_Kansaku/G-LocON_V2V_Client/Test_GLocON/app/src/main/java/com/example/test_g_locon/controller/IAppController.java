@@ -76,5 +76,8 @@ public interface IAppController {
      * @param lat 仮想緯度
      * @param lng 仮想経度
      */
-    void onSimulationLocationUpdated(double lat, double lng);
+    void onSimulationLocationUpdated(double lat, double lng, double bearing);
+
+    /** [SUMOモード] 状態の通知（車の割り当て・到着など） */
+    void onSumoStatus(String message);
 }

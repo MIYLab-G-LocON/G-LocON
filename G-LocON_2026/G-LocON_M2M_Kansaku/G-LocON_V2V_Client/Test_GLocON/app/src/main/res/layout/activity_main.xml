@@ -331,4 +331,39 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintBottom_toTopOf="@id/end" />
 
+    <!-- ========================================================
+         左下：他車両の表示切り替え（全て → 実機のみ → なし）
+         ======================================================== -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/displayButton"
+        style="@style/Widget.Material3.Button.OutlinedButton"
+        android:layout_width="wrap_content"
+        android:layout_height="48dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginBottom="8dp"
+        android:text="表示:全"
+        android:textSize="14sp"
+        app:cornerRadius="24dp"
+        app:strokeWidth="2dp"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/sumoButton" />
+
+    <!-- ========================================================
+         左下：SUMOモード開始（仮想位置ボタンの上）
+         PC上の SimBridge から割り当てられたSUMO車両として走行する
+         ======================================================== -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/sumoButton"
+        style="@style/Widget.Material3.Button.OutlinedButton"
+        android:layout_width="wrap_content"
+        android:layout_height="48dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginBottom="8dp"
+        android:text="SUMO"
+        android:textSize="14sp"
+        app:cornerRadius="24dp"
+        app:strokeWidth="2dp"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/virtPosButton" />
+
 </androidx.constraintlayout.widget.ConstraintLayout>
