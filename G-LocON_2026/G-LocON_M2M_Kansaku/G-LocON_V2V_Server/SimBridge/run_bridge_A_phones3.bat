@@ -1,8 +1,7 @@
 @echo off
-chcp 65001 >nul
-rem 評価2: SUMO＋実機3台（モードA）
-rem ダブルクリックで起動できる（このファイルのあるフォルダに移動してから実行する）。
-rem 引数を足したいときは，このファイルをコピーして最後の行を書き換える。
+rem Evaluation 2: SUMO + 3 phones (mode A)
+rem Double-click to run. Moves to this folder first, then runs the command.
+rem To add options (e.g. --join-eta 30), copy this file and edit the python line.
 cd /d "%~dp0"
 title run_bridge_A_phones3.bat
 python sim_bridge.py --phones 3 --gui %*

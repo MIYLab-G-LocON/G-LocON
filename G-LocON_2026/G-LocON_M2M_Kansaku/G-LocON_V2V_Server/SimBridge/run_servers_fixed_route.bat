@@ -1,8 +1,7 @@
 @echo off
-chcp 65001 >nul
-rem 固定ルート用（評価1: ES1〜ES3）のサーバ一式を起動する
-rem ダブルクリックで起動できる（このファイルのあるフォルダに移動してから実行する）。
-rem 引数を足したいときは，このファイルをコピーして最後の行を書き換える。
+rem Start servers for the fixed route (evaluation 1: ES1-ES3)
+rem Double-click to run. Moves to this folder first, then runs the command.
+rem To add options (e.g. --join-eta 30), copy this file and edit the python line.
 cd /d "%~dp0"
 title run_servers_fixed_route.bat
 python start_servers.py --stun --csv ..\MasterServer\edge_servers.csv %*
