@@ -481,6 +481,21 @@ EdgeServerは交差点1つにつき1プロセス起動する．起動する交�
 
 ### 8.2 サーバの一括起動（IntelliJ 不要）
 
+**ダブルクリックで起動する**: `G-LocON_V2V_Server/SimBridge/` にあるバッチファイルを使えば，フォルダの移動やコマンドの入力は要らない
+（右クリック →「ショートカットの作成」でデスクトップに置くと便利）．終了はウィンドウで Ctrl+C（「バッチ ジョブを終了しますか」には Y）．
+
+| ファイル | 内容 |
+|---|---|
+| `run_servers.bat` | サーバ一式（STUN・MasterServer・SUMO用エッジサーバ10か所） |
+| `run_servers_fixed_route.bat` | 固定ルート用（評価①: ES1〜ES3）のサーバ一式 |
+| `run_bridge_A_phones3.bat` | 評価②: SUMO＋実機3台（sumo-gui あり） |
+| `run_bridge_B_virtual.bat` | 評価③: SUMO＋仮想クライアント＋実機1台（sumo-gui あり，実機の車を追従） |
+| `run_bridge_pc_only.bat` | スマホなし・PCだけで試す |
+
+τ・δ などを変えるときは，バッチファイルをコピーして最後の `python ...` の行に引数（`--join-eta 30` など）を足す．
+
+**コマンドで起動する**場合は次のとおり．
+
 8.1 の個別起動の代わりに，`G-LocON_V2V_Server/SimBridge/start_servers.py` で STUN・MasterServer・エッジサーバをまとめて起動できる（事前に IntelliJ で **ビルド → プロジェクトのビルド** をしておくこと）．
 
 ```
