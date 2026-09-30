@@ -21,7 +21,8 @@ EDGE_SERVER_IP = "192.168.137.1"
 EDGE_SERVER_BASE_PORT = 55600
 
 # アプリ側の設定と揃える
-JOIN_ETA_SEC = 30.0      # τ: ETAがこれを下回るとJOIN
+JOIN_ETA_SEC = 30.0      # τ（参加タイミング）: ETAがこれを下回るとJOIN
+                         # 評価では 15 / 30 / 45秒を比較する（sim_bridge.py・run_scenario.py の --join-eta）
 LEAVE_DIST_M = 60.0      # δ（離脱円の半径）: 通過後，交差点からこれ以上離れ，かつ遠ざかっていればLEAVE
                          # 評価では 30 / 60 / 100m を比較する（sim_bridge.py・run_scenario.py の --leave-dist）
 

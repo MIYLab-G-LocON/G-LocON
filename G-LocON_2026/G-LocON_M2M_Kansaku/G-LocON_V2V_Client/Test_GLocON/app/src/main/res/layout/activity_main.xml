@@ -92,7 +92,8 @@
     <!-- ========================================================
          上部：状態カード（開始後に表示）
          1行目: 走行モード（GPS / 仮想走行 / SUMO車両）
-         2行目: 参加中のグループ数・P2Pでつながっている車（実機／仮想）・離脱円の半径
+         2行目: 参加中のグループ数・P2Pでつながっている車（実機／仮想）
+         3行目: 参加タイミング τ・離脱円 δ（タップで候補から選ぶ）
          ======================================================== -->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/statusCard"
@@ -156,7 +157,7 @@
                     android:text="グループ 0 ・ つながっている車 0"
                     android:textColor="@color/text_secondary"
                     android:textSize="12sp"
-                    android:singleLine="true"
+                    android:maxLines="2"
                     android:ellipsize="end" />
             </LinearLayout>
         </LinearLayout>

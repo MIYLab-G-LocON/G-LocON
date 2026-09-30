@@ -1,7 +1,7 @@
 """実行結果の集計（サービス指標）.
 
     python summarize.py                 # out/ 以下の全実行を比較
-    python summarize.py none_s1 ideal_s1_d30 ideal_s1_d60 ideal_s1_d100
+    python summarize.py none_s1 ideal_s1_t30_d30 ideal_s1_t30_d60 ideal_s1_t30_d100
 
 指標:
     near_miss      TTC < 3秒 となった危険な接近の件数（SSM）

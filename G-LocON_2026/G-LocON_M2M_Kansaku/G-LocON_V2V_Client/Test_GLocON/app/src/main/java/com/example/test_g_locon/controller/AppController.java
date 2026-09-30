@@ -106,6 +106,15 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
      *   これにより「同じ方向に継続して高速移動している場合のみ警告」と等価になる。
      */
     private static final int SPEED_SMOOTH_SAMPLES = 5;
+    /**
+     * 進行方向を更新する条件。止まっているとGPSの位置が数mずつ揺れ，前回との差から求めた向きが
+     * ばらばらになる（矢印が回る）。GPSが測った速度がこれ以上のとき（動いているとき）だけ向きを更新する
+     */
+    private static final float BEARING_MIN_SPEED_MPS = 1.5f;   // 約5 km/h
+    /** GPSの速度が無い（ネットワーク測位など）ときは，この距離以上かつ位置の誤差以上動いたときだけ向きを更新する */
+    private static final double BEARING_MIN_MOVE_M = 5.0;
+    /** 最後に決まった進行方向（止まっている間はこれを使う） */
+    private double lastBearing = 0;
     private final Deque<Double> speedHistory = new ArrayDeque<>();
 
     // [追加] GPS非依存の定期 signalingSearch 用スケジューラ
@@ -283,18 +292,34 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
         // searchScheduler が5秒ごとに SEARCH を送り続けるため P2P 接続は維持される。
         if (useVirtualPosition) return;
 
-        // 進行方向の計算（北を0度とする方位角）
-        double bearing = new HeadUp(
+        double moved = new HubenyDistance().calcDistance(
                 currentLocation.getLatitude(), currentLocation.getLongitude(),
                 geo.getLatitude(), geo.getLongitude()
-        ).getNowAngle();
+        );
 
-        // 瞬時速度 (km/h) を2点間距離から算出
-        // HubenyDistance は距離(m)を返す。GPS更新間隔を1秒と仮定して m/s→km/h に換算
-        double rawSpeed = new HubenyDistance().calcDistance(
-                currentLocation.getLatitude(), currentLocation.getLongitude(),
-                geo.getLatitude(), geo.getLongitude()
-        ) * 3.6;
+        // 進行方向（北を0度とする方位角）。止まっているときのGPSの揺れで向きが回らないよう，動いているときだけ更新する
+        //   1. GPSが速度と向きを測っていれば，速度が BEARING_MIN_SPEED_MPS 以上のときだけその向きを使う
+        //   2. 無ければ，BEARING_MIN_MOVE_M 以上かつ位置の誤差以上動いたときだけ前回からの向きを使う
+        //   3. それ以外（止まっている・初回）は前回の向きのまま
+        double bearing = lastBearing;
+        if (totalGeoUpdateCount > 0) {
+            if (geo.hasSpeed()) {
+                if (geo.getSpeed() >= BEARING_MIN_SPEED_MPS) {
+                    bearing = geo.hasBearing() ? geo.getBearing()
+                            : new HeadUp(currentLocation.getLatitude(), currentLocation.getLongitude(),
+                                         geo.getLatitude(), geo.getLongitude()).getNowAngle();
+                }
+            } else if (moved >= Math.max(BEARING_MIN_MOVE_M, geo.hasAccuracy() ? geo.getAccuracy() : 0)) {
+                bearing = new HeadUp(currentLocation.getLatitude(), currentLocation.getLongitude(),
+                                     geo.getLatitude(), geo.getLongitude()).getNowAngle();
+            }
+        }
+        lastBearing = bearing;
+
+        // 速度 (km/h)。GPSが測った速度（ドップラー。止まっていればほぼ0）があればそれを使う。
+        // 無ければ2点間距離から求める（GPS更新間隔を1秒と仮定して m/s→km/h に換算）。
+        // 2点間距離だけだと，止まっていてもGPSの揺れで 10〜30 km/h に見え，ETA（JOIN）が狂っていた
+        double rawSpeed = geo.hasSpeed() ? geo.getSpeed() * 3.6 : moved * 3.6;
 
         // [追加] 移動平均で GPS ブレによる速度スパイクを除去する。
         // 直近 SPEED_SMOOTH_SAMPLES 回分の瞬時速度を保持し、その平均を使用する。

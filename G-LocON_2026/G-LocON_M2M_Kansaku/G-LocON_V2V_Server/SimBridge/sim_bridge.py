@@ -23,7 +23,7 @@
 
 ■ 仮想クライアント（--virtual）
     SUMOの車1台ごとに専用のUDPソケットを持ち，アプリと同じ手順・同じ形式で
-      INTERSECTION_QUERY（MasterServer）→ ETA<30秒でJOIN／通過後δ（既定60m）離れて遠ざかったらLEAVE／15秒ごとKEEPALIVE
+      INTERSECTION_QUERY（MasterServer）→ ETA<τ（既定30秒）でJOIN／通過後δ（既定60m）離れて遠ざかったらLEAVE／15秒ごとKEEPALIVE
     を送る。エッジサーバから届くメンバー一覧・追加・離脱通知でグループを管理し，
     グループ内の実機へ位置（SendLocation）を1秒ごとに送る（実機の地図に仮想車両として表示される）。
     peerID は "sim-<車両ID>"。
@@ -186,6 +186,7 @@ class Bridge:
         x, y = self.net.getEdge(dest_edge).getToNode().getCoord()
         dlon, dlat = self.net.convertXY2LonLat(x, y)
         self.send_phone(ph, {"processType": "SIM_ROUTE", "vehicleId": ph.vid, "leaveDist": common.LEAVE_DIST_M,
+                             "joinEta": common.JOIN_ETA_SEC,
                              "intersections": [{"intersectionId": i, "lat": la, "lon": lo} for i, la, lo in seq],
                              "destLat": dlat, "destLon": dlon})
 
@@ -574,6 +575,8 @@ def main():
     ap.add_argument("--virtual-max", type=int, default=300, help="同時に動かす仮想クライアントの上限")
     ap.add_argument("--vloc-all", action="store_true", help="仮想クライアントどうしにも位置を送る（既定は実機にだけ送る）")
     ap.add_argument("--gui", action="store_true", help="sumo-gui で表示し，グループごとに色分けする")
+    ap.add_argument("--join-eta", type=float, default=common.JOIN_ETA_SEC,
+                    help="参加タイミング τ [秒]: 交差点までのETAがこれを下回ったらJOIN（実機にも同じ値を送る）。評価では 15 / 30 / 45")
     ap.add_argument("--leave-dist", type=float, default=common.LEAVE_DIST_M,
                     help="離脱円の半径 δ [m]（実機にも同じ値を送る）。評価では 30 / 60 / 100")
     ap.add_argument("--follow-phone", action="store_true",
@@ -598,7 +601,9 @@ def main():
         a.master, a.advertise_ip, a.override_es_ip = "127.0.0.1:55556", "127.0.0.1", "127.0.0.1"
     a.master_host, a.master_port = a.master.split(":")[0], int(a.master.split(":")[1])
     common.LEAVE_DIST_M = a.leave_dist
-    a.out = os.path.join(common.OUT_DIR, time.strftime("live_%Y%m%d_%H%M%S") + f"_d{int(a.leave_dist)}")
+    common.JOIN_ETA_SEC = a.join_eta
+    a.out = os.path.join(common.OUT_DIR, time.strftime("live_%Y%m%d_%H%M%S")
+                         + f"_t{int(a.join_eta)}_d{int(a.leave_dist)}")
     os.makedirs(a.out, exist_ok=True)
 
     common.sumo_home()
@@ -636,7 +641,7 @@ def main():
     ew.writerow(["simTime", "wallTime", "event", "peer", "target", "detail"])
     br = Bridge(a, traci, net, route_ix, ew)
     print(f"SimBridge 起動: スマホ待ち受け {a.bind_host}:{a.bind_port}, 実機 {a.phones} 台, "
-          f"仮想クライアント {'あり' if a.virtual else 'なし'}, 離脱円 {a.leave_dist:.0f} m, 出力 {a.out}")
+          f"仮想クライアント {'あり' if a.virtual else 'なし'}, 参加 ETA<{a.join_eta:.0f}秒, 離脱円 {a.leave_dist:.0f} m, 出力 {a.out}")
     try:
         br.run()
     except KeyboardInterrupt:

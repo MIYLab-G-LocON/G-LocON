@@ -89,6 +89,8 @@ public class MapManager {
     private final Map<String, Marker> intersectionMarkers = new HashMap<>();
     /** エッジサーバ交差点の離脱円（半径 = IntersectionManager.getLeaveThresholdM()）: intersectionId → Polygon */
     private final Map<String, Polygon> leaveCircles = new HashMap<>();
+    /** 離脱円の中心（半径を変えたときに描き直すため） */
+    private final Map<String, GeoPoint> leaveCircleCenters = new HashMap<>();
     /** 交差点マーカー色: JOIN前=グレー, JOIN中=緑 */
     private static final int COLOR_INTERSECTION_DEFAULT = Color.rgb(150, 150, 150); // グレー
     private static final int COLOR_INTERSECTION_JOINED  = Color.rgb(0, 200, 80);   // 緑
@@ -398,6 +400,7 @@ public class MapManager {
                 mapView.getOverlays().remove(c);
             }
             leaveCircles.clear();
+            leaveCircleCenters.clear();
 
             // ルートライン描画
             List<GeoPoint> points = new ArrayList<>();
@@ -420,6 +423,7 @@ public class MapManager {
                     c.setInfoWindow(null);
                     mapView.getOverlays().add(c);
                     leaveCircles.put(i.getIntersectionId(), c);
+                    leaveCircleCenters.put(i.getIntersectionId(), new GeoPoint(i.getLat(), i.getLng()));
                 }
             }
 
@@ -438,6 +442,18 @@ public class MapManager {
             }
             mapView.invalidate();
             Log.d(TAG, "ルート描画完了: 交差点数=" + intersections.size());
+        });
+    }
+
+    /** 離脱円の半径（δ）を変えたときに，今の円を新しい半径で描き直す */
+    public void refreshLeaveCircles() {
+        uiHandler.post(() -> {
+            double r = IntersectionManager.getLeaveThresholdM();
+            for (Map.Entry<String, Polygon> e : leaveCircles.entrySet()) {
+                GeoPoint center = leaveCircleCenters.get(e.getKey());
+                if (center != null) e.getValue().setPoints(Polygon.pointsAsCircle(center, r));
+            }
+            mapView.invalidate();
         });
     }
 

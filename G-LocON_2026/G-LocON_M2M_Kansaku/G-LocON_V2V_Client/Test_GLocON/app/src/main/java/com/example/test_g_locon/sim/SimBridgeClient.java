@@ -132,6 +132,7 @@ public class SimBridgeClient implements Runnable {
                 vehicleId = m.getString("vehicleId");
                 // 離脱円の半径は SimBridge の設定に合わせる（仮想クライアントと同じ条件で比較するため）
                 if (m.has("leaveDist")) IntersectionManager.setLeaveThresholdM(m.getDouble("leaveDist"));
+                if (m.has("joinEta")) IntersectionManager.setJoinEtaSec(m.getDouble("joinEta"));
                 JSONArray arr = m.getJSONArray("intersections");
                 List<Intersection> list = new ArrayList<>();
                 for (int i = 0; i < arr.length(); i++) {

@@ -24,6 +24,7 @@ import com.example.test_g_locon.navigation.IntersectionManager;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.button.MaterialButtonToggleGroup;
 import com.google.android.material.card.MaterialCardView;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
@@ -179,6 +180,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         displayToggle.addOnButtonCheckedListener((group, checkedId, isChecked) -> {
             if (isChecked) onDisplaySelected(checkedId);
         });
+        statusCard.setOnClickListener(v -> showJoinEtaDialog());
 
         start.setOnClickListener(this);
         end.setOnClickListener(this);
@@ -505,12 +507,63 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         updateStatus();
     }
 
-    /** 状態カードの2行目: 参加中のグループ・つながっている車・離脱円 */
+    /** 状態カードの2・3行目: 参加中のグループ・つながっている車／参加タイミング・離脱円 */
     private void updateStatus() {
         final String sub = "グループ " + joinedIds.size()
                 + " ・ つながっている車 実機" + realPeers + " / 仮想" + virtualPeers
+                + "\n参加 ETA " + Math.round(IntersectionManager.getJoinEtaSec()) + "秒前"
                 + " ・ 離脱円 " + Math.round(IntersectionManager.getLeaveThresholdM()) + "m";
         runOnUiThread(() -> statusSub.setText(sub));
+    }
+
+    // ---- 参加タイミング τ・離脱円 δ の選択（状態カードをタップ） ----
+    // 実機だけで走る評価（SUMOを使わない）で，アプリを作り直さずに候補を切り替えるため。
+    // SUMOモードでは sim_bridge.py の --join-eta / --leave-dist が SIM_ROUTE で届くのでそちらを使う
+
+    private void showJoinEtaDialog() {
+        if (appController.isSumoMode()) {
+            showToast("SUMOモードでは sim_bridge.py の --join-eta / --leave-dist の値を使います");
+            return;
+        }
+        final double[] c = IntersectionManager.JOIN_ETA_CANDIDATES_SEC;
+        String[] labels = new String[c.length];
+        int now = 0;
+        for (int i = 0; i < c.length; i++) {
+            labels[i] = "交差点の " + Math.round(c[i]) + "秒前に参加"
+                    + (c[i] == IntersectionManager.DEFAULT_JOIN_ETA_SEC ? "（既定）" : "");
+            if (c[i] == IntersectionManager.getJoinEtaSec()) now = i;
+        }
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("参加タイミング τ（ETA）")
+                .setSingleChoiceItems(labels, now, (d, which) -> {
+                    IntersectionManager.setJoinEtaSec(c[which]);
+                    d.dismiss();
+                    updateStatus();
+                    showLeaveDialog();
+                })
+                .setNegativeButton("閉じる", null)
+                .show();
+    }
+
+    private void showLeaveDialog() {
+        final double[] c = IntersectionManager.LEAVE_CANDIDATES_M;
+        String[] labels = new String[c.length];
+        int now = 0;
+        for (int i = 0; i < c.length; i++) {
+            labels[i] = "半径 " + Math.round(c[i]) + "m"
+                    + (c[i] == IntersectionManager.DEFAULT_LEAVE_THRESHOLD_M ? "（既定）" : "");
+            if (c[i] == IntersectionManager.getLeaveThresholdM()) now = i;
+        }
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("離脱円 δ")
+                .setSingleChoiceItems(labels, now, (d, which) -> {
+                    IntersectionManager.setLeaveThresholdM(c[which]);
+                    d.dismiss();
+                    mapManager.refreshLeaveCircles();
+                    updateStatus();
+                })
+                .setNegativeButton("閉じる", null)
+                .show();
     }
 
     /** SIMボタンの表示（走行中は「停止」） */

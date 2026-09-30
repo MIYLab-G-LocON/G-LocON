@@ -16,7 +16,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * JOIN/LEAVEが必要な交差点をコールバックで通知する。
  *
  * パラメータ:
- *   ETA_THRESHOLD_SEC  = 30.0  : ETA がこの値以下になったらJOIN
+ *   参加タイミング τ  = 30.0  : ETA がこの値を下回ったらJOIN
+ *                                （評価では 15 / 30 / 45秒を比較する。SUMOモードでは SimBridge から値を受け取る）
  *   PASS_RADIUS_M      = 20.0  : 交差点にこの距離まで近づいたら「通過済み」とする
  *   離脱円の半径 δ    = 60.0  : 通過済みで，交差点から この距離以上かつ遠ざかっていたらLEAVE
  *                                （評価では 30 / 60 / 100m を比較する。SUMOモードでは SimBridge から値を受け取る）
@@ -36,7 +37,6 @@ public class IntersectionManager {
         void onShouldLeave(Intersection intersection);
     }
 
-    private static final double ETA_THRESHOLD_SEC = 30.0;
     public  static final double PASS_RADIUS_M     = 20.0;
     private static final int    PASS_LOOKAHEAD    = 3;
     private static final double MIN_SPEED_MPS     = 1.0; // ETA計算の最低速度（停止中の除算エラー防止）
@@ -48,6 +48,16 @@ public class IntersectionManager {
 
     public static double getLeaveThresholdM() { return leaveThresholdM; }
     public static void setLeaveThresholdM(double m) { if (m > 0) leaveThresholdM = m; }
+
+    /** 参加タイミング τ の既定値 [秒]: 交差点までのETAがこれを下回ったらJOIN */
+    public  static final double DEFAULT_JOIN_ETA_SEC = 30.0;
+    /** 評価で比べる候補（状態カードをタップして選べる） */
+    public  static final double[] JOIN_ETA_CANDIDATES_SEC = {15.0, 30.0, 45.0};
+    public  static final double[] LEAVE_CANDIDATES_M      = {30.0, 60.0, 100.0};
+    private static volatile double joinEtaSec = DEFAULT_JOIN_ETA_SEC;
+
+    public static double getJoinEtaSec() { return joinEtaSec; }
+    public static void setJoinEtaSec(double s) { if (s > 0) joinEtaSec = s; }
 
     private final List<Intersection> intersections = new CopyOnWriteArrayList<>();
     private final HubenyDistance hubeny = new HubenyDistance();
@@ -128,7 +138,7 @@ public class IntersectionManager {
             if (!intersection.isJoined() && !intersection.hasJoinedAndLeft()
                     && intersection.hasEdgeServer()) {
                 // JOIN判定: ETA < τ
-                if (eta < ETA_THRESHOLD_SEC) {
+                if (eta < joinEtaSec) {
                     intersection.setJoined(true);
                     logJoin(intersection, now, "JOIN");
                     if (callback != null) callback.onShouldJoin(intersection);
