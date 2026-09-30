@@ -12,7 +12,7 @@
 5. [実装順序とgit記録方針](#5-実装順序とgit記録方針)
 6. [シミュレーション設計（SUMO）](#6-シミュレーション設計sumo)
 7. [評価設計](#7-評価設計)
-8. [起動手順](#8-起動手順)
+8. [起動手順・検証の手順](#8-起動手順)
 9. [トラブルシューティング](#9-トラブルシューティング)
 10. [評価指標の優先度まとめ](#10-評価指標の優先度まとめ)
 
@@ -237,7 +237,7 @@ CARLAはSUMOとの公式連携（co-simulation）があるため，デモ用の�
 - **仮想クライアント**: SUMOの車両1台ごとに専用のUDPソケットを持ち，アプリと同じ手順・同じ形式で
   MasterServerへの問い合わせ，ETA<τ（既定15秒）でJOIN，通過後にδ（既定60m）離れて遠ざかったらLEAVE，15秒ごとのKEEPALIVE を行う．
   エッジサーバからは実機と区別がつかない．グループ内の実機へは位置（SendLocation）も送るため，実機の地図に仮想車両が表示される（peerID は `sim-<車両ID>`）
-- **表示の切り替え**: アプリの「表示」ボタンで，他車両を「P2P → 全車両 → 実機のみ → なし」の順に切り替える．
+- **表示の切り替え**: アプリの下の操作パネルで，他車両の表示を「P2P / 全車両 / 実機 / なし」から選ぶ．
   「P2P」はP2Pでつながった車（実機は赤・緑，仮想車両は半透明の灰色のピン），
   「全車両」はそれに加えてつながっていない車も小さな矢印で出す（灰色=SUMOの車，青=実機．SimBridge が `SIM_VEHICLES` で送る）．
   2つを見比べると，グループに入ってP2Pでつながった車がどれかが分かる
@@ -478,30 +478,103 @@ EdgeServerは交差点1つにつき1プロセス起動する．起動する交�
 
 ---
 
-### 8.2 SUMOモードでの起動手順（SimBridge）
+### 8.2 サーバの一括起動（IntelliJ 不要）
 
-SUMOと実時間でつないで実験する場合は，上記の個別起動の代わりに `G-LocON_V2V_Server/SimBridge/` のスクリプトを使う．
-詳しい準備・引数・出力は [SimBridge/README.md](G-LocON_V2V_Server/SimBridge/README.md) を参照．
+8.1 の個別起動の代わりに，`G-LocON_V2V_Server/SimBridge/start_servers.py` で STUN・MasterServer・エッジサーバをまとめて起動できる（事前に IntelliJ で **ビルド → プロジェクトのビルド** をしておくこと）．
 
 ```
-cd G-LocON_V2V_Server/SimBridge
-python start_servers.py --stun                        # STUN・MasterServer・全エッジサーバを一括起動（別ウィンドウで）
-python sim_bridge.py --phones 3                       # モードA: 実機3台
-python sim_bridge.py --phones 1 --virtual --gui       # モードB: 仮想クライアント＋実機1台（sumo-guiで色分け表示）
-python sim_bridge.py --phones 0 --virtual --gui --local   # 実機なし・PCだけで試す
-python sim_bridge.py --phones 1 --virtual --gui --leave-dist 100   # 離脱円 δ を変える（30 / 60 / 100，既定60）
-python sim_bridge.py --phones 1 --virtual --gui --join-eta 30      # 参加タイミング τ を変える（15 / 30 / 45秒，既定15）
+cd G-LocON_V2V_Server\SimBridge
+python start_servers.py --stun                                      # SUMO用: scenario/edge_servers.csv の10か所
+python start_servers.py --stun --csv ..\MasterServer\edge_servers.csv   # 固定ルート用（評価①）: ES1〜ES3 の3か所
 ```
 
-**グループのJOIN/LEAVEの確認**（IntelliJ を使わない場合）
-
-- `start_servers.py` のウィンドウに，各エッジサーバの JOIN / LEAVE が時刻・ポート付きで流れる（`--show all` で全出力，`--show none` で非表示）．
-  スマホで「開始」を押すと `[STUNServer] STUNServer;getMsg:Hello` が出る（出なければスマホの通信がPCに届いていない）
-- 全出力はサーバごとに `SimBridge/out/servers/EdgeServer_<ポート>.log`，`MasterServer.log` に時刻付きで保存される．
+- ウィンドウに JOIN / LEAVE が時刻・ポート付きで流れる（`--show all` で全出力，`--show none` で非表示）．
+  スマホで「開始」を押すと `[STUNServer] STUNServer;getMsg:Hello` が出る（出なければスマホの通信がPCに届いていない → 9.2）
+- 全出力はサーバごとに `SimBridge/out/servers/EdgeServer_<ポート>.log`，`MasterServer.log`，`STUNServer.log` に時刻付きで保存される．
   1つのサーバだけ追う場合は PowerShell で `Get-Content out\servers\EdgeServer_55600.log -Wait -Tail 20`
-- SimBridge 側の記録は `SimBridge/out/live_<日時>_d<δ>/`（`events.csv` に JOIN/LEAVE，`summary.txt` に集計）
+- Ctrl+C で全サーバを終了する
 
-スマホではアプリの「開始」→「SUMO」を押す．「表示」ボタンで他車両を「P2P → 全車両 → 実機のみ → なし」に切り替える．
+---
+
+### 8.3 検証の手順
+
+#### 初回の準備（PC・スマホ）
+
+| 項目 | 内容 |
+|---|---|
+| PC | JDK 17，Python 3（`cd G-LocON_V2V_Server\SimBridge` → `pip install -r requirements.txt` で SUMO も入る），IntelliJ でサーバをビルド |
+| ネットワーク | PCのモバイルホットスポットをオン（「省電力」はオフ），スマホをつなぐ．ファイアウォールでUDP 55554〜55700 を許可（9.1） |
+| IPアドレス | アプリの `MainActivity.SERVER_IP`・`AppController.MASTER_SERVER_IP` を PC のIP（ホットスポットなら `192.168.137.1`）に合わせる（9.3） |
+| スマホ | Android Studio でアプリをビルドして入れる（認識しないとき 9.11） |
+| ターミナル | エクスプローラーで `G-LocON_V2V_Server\SimBridge` を開き，アドレス欄に `powershell` と入力して Enter すると，そのフォルダで PowerShell が開く |
+
+#### アプリの画面
+
+| 場所 | 内容 |
+|---|---|
+| 上（開始前） | Peer ID の入力と「開始」．**端末ごとに別の Peer ID**（phone1 など）にする |
+| 上（開始後） | 状態カード: 1行目=走行モード（GPS / 仮想走行 / SUMO車両），2行目=参加中のグループ数・P2Pでつながっている車（実機/仮想），3行目=参加タイミング τ・離脱円 δ．**タップで τ・δ を候補から選ぶ**（SUMOモードでは sim_bridge.py の値） |
+| 右 | コンパス（N↑ 北が上 → H↑ 進行方向が上 → 固定 地図を動かさない）とズーム |
+| 下 | 他の車の表示（P2P / 全車両 / 実機 / なし）と，SUMO・SIM・仮想位置・目的地・終了 |
+| 地図 | 六角形 = エッジサーバ交差点（JOIN中は緑），円 = 離脱円（半径 δ），ピン = P2Pでつながった車（実機は赤・緑，仮想は灰色），小さい矢印 = つながっていない車（全車両表示のとき） |
+
+#### 評価① 実機だけ（固定ルート，SUMOなし）
+
+1. PC: `python start_servers.py --stun --csv ..\MasterServer\edge_servers.csv`（ES1〜ES3）
+2. 各スマホ: Peer ID を入れて「開始」 → 状態カードが「現在地（GPS）」になり，地図が現在地に移る
+3. 状態カードをタップして τ・δ を選ぶ（**全端末で同じ値にする**）
+4. 「目的地」 → 緯度・経度を入れて「設定」（既定 35.949066, 139.640614） → 「ルート取得完了」と出て，ルート・エッジサーバ交差点・離脱円が出る
+5. そのまま走行する（GPS）．机上で試すときは「仮想位置」→「SIM」でルート上を10m/sで自動走行（9.8）
+6. 確認すること:
+   - 交差点の手前（ETA < τ）で六角形と円が緑になり，状態カードの「グループ」が増える．サーバのウィンドウに `JOIN:` が出る
+   - 交差点を通過して離脱円の外に出ると灰色に戻り，`LEAVE:` が出る
+   - 同じ交差点グループに入った他のスマホがピンで出る（状態カードの「つながっている車 実機n」）
+7. 「終了」で終了（サーバからも離脱する）
+
+#### 評価② SUMO＋実機3台（モードA: 実機どうしの通信）
+
+1. PC ターミナル1: `python start_servers.py --stun`
+2. PC ターミナル2: `python sim_bridge.py --phones 3 --gui`（`--gui` を付けると sumo-gui が開く）
+3. 各スマホ: 「開始」 → 「SUMO」 → 状態カードが「SUMO車両 vXX に乗車（交差点 n）」になり，その車の位置で走り出す．
+   車が目的地に着くと自動で次の車に乗り換える
+4. 確認すること:
+   - sumo-gui では実機が乗っている車が紫（紫の円で囲む）
+   - 実機どうしが同じ交差点グループに入ると，互いの地図にピンが出る（「全車両」表示にすると，つながっていない実機は青の矢印）
+5. 終了: ターミナル2で Ctrl+C（全ての車が着くと自動で終わる）．記録は `SimBridge/out/live_<日時>_t<τ>_d<δ>/`
+
+#### 評価③ SUMO＋仮想クライアント＋実機1台（モードB: 多数車両のグルーピング・サーバ負荷）
+
+1. PC ターミナル1: `python start_servers.py --stun`
+2. PC ターミナル2: `python sim_bridge.py --phones 1 --virtual --gui --follow-phone`
+   （`--follow-phone`: sumo-gui の画面が実機の車を追いかける）
+3. スマホ: 「開始」 → 「SUMO」
+4. 確認すること:
+   - sumo-gui で車がグループ（交差点）ごとの色に変わる（交差点の印・離脱円と同じ色，未参加は灰色）
+   - スマホの地図に同じグループの仮想車両が灰色のピンで出る．「全車両」にすると，グループ外の車も矢印で出て違いが分かる
+   - 終了時に出る集計（`summary.txt`）: JOIN の返信率，JOIN 応答時間，グループ一覧の一致率（100% が正常）
+5. パラメータを変える: `--join-eta 15/30/45`（τ），`--leave-dist 30/60/100`（δ）．スマホにも同じ値が送られる
+
+#### PCだけで試す（スマホなし）
+
+```
+python start_servers.py
+python sim_bridge.py --phones 0 --virtual --gui --local
+```
+
+#### 通信なしの比較（V2Vなし／理想V2V，交通への影響）
+
+[SimBridge/README.md](G-LocON_V2V_Server/SimBridge/README.md) の「使い方」（`run_scenario.py --mode none / ideal` → `summarize.py`）
+
+---
+
+### 8.4 結果・ログの場所
+
+| 何の記録 | 場所 | 内容 |
+|---|---|---|
+| サーバ | `SimBridge/out/servers/*.log` | 各サーバの出力（JOIN/LEAVE，STUN の受信など，時刻付き） |
+| SimBridge（評価②③） | `SimBridge/out/live_<日時>_t<τ>_d<δ>/` | `events.csv`（JOIN/LEAVE・割り当て等の時系列），`consistency.csv`（グループ一覧の比較），`summary.txt`（集計），`tripinfo.xml`（SUMOの車ごとの走行記録） |
+| 通信なしの比較 | `SimBridge/out/<mode>_s<seed>[_t<τ>_d<δ>]/`，`out/summary.csv` | SUMO の出力（急接近・急ブレーキ・走行時間）と比較表 |
+| アプリ | スマホの `Android/data/com.example.test_g_locon/files/` | `join_log.csv`（JOIN/LEAVE の時刻・ETA・距離），`p2p_log.csv`．PCへは Android Studio の Device Explorer か `adb pull /sdcard/Android/data/com.example.test_g_locon/files/` |
 
 ---
 
@@ -516,10 +589,11 @@ python sim_bridge.py --phones 1 --virtual --gui --join-eta 30      # 参加タ�
 **対処**: PowerShell（**管理者として実行**）で以下を実行する．
 
 ```powershell
-netsh advfirewall firewall add rule name="G-LocON UDP IN" protocol=UDP dir=in localport=55554-55639 action=allow profile=any
+netsh advfirewall firewall add rule name="G-LocON UDP IN" protocol=UDP dir=in localport=55554-55700 action=allow profile=any
 ```
 
-`OK` と表示されれば設定完了．
+`OK` と表示されれば設定完了．55554〜55700 には STUN・Signaling・MasterServer・全エッジサーバ（55600〜）・SimBridge（55700）が含まれる．
+以前の範囲（55554-55639）で作った場合は，同じ名前で作り直すか，範囲を変更する（`netsh advfirewall firewall set rule name="G-LocON UDP IN" new localport=55554-55700`）．
 
 > **重要**: `profile=any` を必ず付けること．省略するとモバイルホットスポット・テザリング経由の接続（プロファイル: パブリック）でブロックされる．
 
@@ -622,13 +696,68 @@ CSVには全交差点を記載し，起動するEdgeServerの行だけ有効に�
 実験予定地点にいない場合でも，仮想位置を使ってSIMを動かしてV2Vロジックをデバッグできる．
 
 **手順**:
-1. アプリの「開始」ボタンで通信を開始する
-2. ピアID・目的地を入力してルートを取得する
-3. **「仮想位置」ボタン**を押す → カメラが仮想座標（コード内 `TEST_LATITUDE/LONGITUDE`）に移動する
-4. **「SIM」ボタン**を押す → 仮想位置を起点にルート上を10m/sで自動走行する
-5. 交差点に近づくとJOIN（緑マーカー），離れるとLEAVE（グレー）に変化する
+1. Peer ID を入れて「開始」で通信を始める
+2. 下の「目的地」で緯度・経度を入れて「設定」を押し，ルートを取得する
+3. **「仮想位置」**を押す → 地図が仮想座標（コード内 `TEST_LATITUDE/LONGITUDE`）に移動する
+4. **「SIM」**を押す → 仮想位置を起点にルート上を10m/sで自動走行する（ボタンは「停止」に変わる）
+5. 交差点に近づくとJOIN（六角形と離脱円が緑），離脱円を出て遠ざかるとLEAVE（灰色）に変わる
 
 > **注意**: 仮想位置モード中はGPSによる位置更新・速度計算が無効になる．これはGPS位置と仮想位置が離れている場合に生じる異常速度計算（数万km/h）によるETA誤算を防ぐためである．SIM走行はこの制約の影響を受けない．
+
+### 9.9 サーバが起動しない（ポートが使用中）
+
+**症状**: サーバのログに `BindException` / `Address already in use`，または `start_servers.py` で「起動に失敗したもの」に出る．
+
+**原因**: 前に起動したサーバ（IntelliJ・バッチファイル・前回の `start_servers.py`）が残っていて，同じポートを使っている．
+
+**対処**: 残っているサーバを閉じる．見つからない場合は PowerShell で java を一覧し，古いものを終了する．
+
+```powershell
+Get-Process java | Select-Object Id, StartTime                  # 起動中の java と起動時刻
+Get-Process java | Where-Object { $_.StartTime -lt (Get-Date).Date } | Stop-Process   # 今日より前に起動したものを終了
+```
+
+IntelliJ など他の java も終了させてよければ `Get-Process java | Stop-Process` でまとめて終了できる．
+
+### 9.10 start_servers.py で起動に失敗する（ビルド・java）
+
+**症状**: 「起動に失敗したもの: ...」と出る．ログに `ClassNotFoundException` や `'java' は認識されていません` が出る．
+
+**対処**: IntelliJ で **ビルド → プロジェクトのビルド** を実行し `G-LocON_V2V_Server/out/production/` を作る（サーバのコードを更新したら毎回）．
+`java -version` で JDK 17 が出ることを確認する（出なければ JDK の `bin` を PATH に入れる）．
+
+### 9.11 Android Studio がスマホを認識しない
+
+**症状**: 実行先にスマホが出ない，または `unauthorized` と表示される．
+
+**対処**:
+- スマホの画面に出る「USBデバッグを許可しますか？」で「許可」を押す（出ないときはケーブルを挿し直す）
+- 開発者向けオプションで「USBデバッグの許可を取り消す」→ ケーブルを挿し直して再度許可する
+- 充電専用ケーブルではデータ通信ができないので，データ通信対応のケーブルを使う
+
+### 9.12 SUMOモードで車が割り当てられない
+
+**症状**: 「SUMO」を押しても状態カードが「SimBridge に接続中…」のまま．
+
+**対処**:
+- `sim_bridge.py` が動いているか確認する（先に `start_servers.py`，次に `sim_bridge.py`）
+- `--phones` の台数を超えたスマホは受け付けない（モードBは `--phones 1`）．台数を増やして起動し直す
+- ファイアウォールで UDP 55700 が許可されているか確認する（9.1）
+- 車の割り当ては，エッジサーバ交差点を通る車が出発したとき．起動直後は数秒〜十数秒かかる
+
+### 9.13 sumo-gui の表示が標準のまま・エッジサーバの印が見えない
+
+**症状**: 車が小さく色分けが見えない，画面上部の表示方式が「standard」のまま．
+
+**原因**: `SimBridge/gui_settings.xml` が読み込まれていない．このファイルに XML のコメント（`<!-- -->`）があると SUMO が読み込まない．
+
+**対処**: `gui_settings.xml` にコメントを書かない．画面上部の表示方式の欄で「G-LocON」を選ぶ．
+エッジサーバの印（半径15mの円）と離脱円は拡大・縮小しても表示される．
+
+### 9.14 sumo-gui で実機が乗っている車が見つからない
+
+**対処**: 実機が乗っている車は紫で，紫の円で囲まれる．`sim_bridge.py` に `--follow-phone` を付けると画面がその車を追いかける（乗り換えても追従）．
+車を右クリック →「Show Parameter」の `glocon.phone` に端末名が出る．
 
 ---
 
