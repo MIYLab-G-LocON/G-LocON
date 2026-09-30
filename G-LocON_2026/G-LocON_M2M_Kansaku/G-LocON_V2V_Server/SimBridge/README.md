@@ -20,7 +20,9 @@ pip install -r requirements.txt      # eclipse-sumo, traci, sumolib, pyproj
 
 ```
 python build_net.py              # エリア（既定: 1km四方）を切り出し，全交差点を洗い出す
-python select_edge_servers.py    # その中からランダムにエッジサーバを選ぶ（既定: 10か所）
+python select_edge_servers.py --move 35.95152_139.64821=35.94917_139.64777
+                                 # その中からランダムにエッジサーバを選ぶ（既定: 10か所）。
+                                 # 今の配置は seed=1 のランダム配置のうち，画面中央上の1か所（水色）を中央の交差点へ移したもの
 python make_scenario.py          # エリア内を自由に走る交通流と急停止イベントを作る
 python run_scenario.py --mode none  --seed 1
 python run_scenario.py --mode ideal --seed 1                     # 離脱円 δ=60m（既定）→ out/ideal_s1_d60
@@ -37,6 +39,7 @@ python run_scenario.py --mode none --gui   # 画面で確認
 | select_edge_servers.py | `--count` | 10 | エッジサーバの数 |
 | | `--seed` | 1 | 選び方の乱数（変えると別の配置になる） |
 | | `--min-spacing` | 150 m | エッジサーバどうしの最小距離 |
+| | `--move 元=先` | なし | 選んだ交差点を別の交差点に置き換える（数・ポート・sumo-gui の色はそのまま） |
 | make_scenario.py | `--period` | 1.5 秒 | 車両の発生間隔（小さいほど交通量が多い） |
 | | `--hazards` | 40 | 急停止イベントの数 |
 
@@ -70,7 +73,8 @@ python sim_bridge.py --phones 0 --virtual --gui --local   # 実機なし・PCだ
 
 スマホ側: アプリで「開始」→「SUMO」を押す。SimBridge が車を割り当てると「SUMO車両 v123 に乗車」と表示され，
 その車のルート上の交差点が地図に出て，車の位置で走り始める。車が目的地に着くと次の車に乗り換える。
-「表示」ボタンで他車両を「全て／実機のみ／なし」に切り替える（実機は赤・緑，仮想車両は灰色のピン）。
+「表示」ボタンで他車両を「P2P → 全車両 → 実機のみ → なし」に切り替える。
+「P2P」はP2Pでつながった車のピン（実機は赤・緑，仮想車両は灰色），「全車両」はそれに加えてつながっていない車を小さな矢印（灰色=SUMOの車，青=実機）で出す。
 
 ### sumo-gui の色（--gui）
 
@@ -82,8 +86,11 @@ JOIN中の交差点（`glocon.joined`），LEAVE済みの交差点（`glocon.lef
 | 色 | 意味 |
 |---|---|
 | 紫（紫の円で囲む） | 実機が乗っている車（右クリック→Show Parameter の `glocon.phone` に端末名） |
-| 交差点ごとの色（10色） | その交差点のグループにJOIN中の仮想クライアント |
+| 交差点ごとの色（10色） | その交差点のグループにJOIN中の仮想クライアント（色は `scenario/edge_servers.csv` の行の順。交差点の印と離脱円も同じ色） |
 | 灰色 | どのグループにも入っていない車 |
+
+JOIN/LEAVE の判定・アプリへ送る位置は車の中心を使う（SUMOの車両位置は車の先端）。LEAVE は1秒ごとの判定なので，
+車の中心が離脱円を出てから最大1秒（車体半分〜1台分ほど）遅れて灰色になる。
 
 ### 主な引数
 
@@ -93,6 +100,7 @@ JOIN中の交差点（`glocon.joined`），LEAVE済みの交差点（`glocon.lef
 | `--virtual` | なし | 全車両を仮想クライアントとしてエッジサーバに参加させる |
 | `--virtual-max` | 300 | 同時に動かす仮想クライアントの上限（WindowsではソケットはPython全体で約500まで） |
 | `--leave-dist` | 60 | 離脱円の半径 δ [m]（評価では 30 / 60 / 100）。実機にも `SIM_ROUTE` で同じ値を送る。出力フォルダ名の末尾に `_d<δ>` が付く |
+| `--others-radius` | 400 | 実機へ1秒ごとに送る「周りの全車両」の範囲 [m]（アプリの「表示:全車両」用。0で送らない） |
 | `--follow-phone` | なし | sumo-gui の画面を実機が乗っている車に追従させる（乗り換えても追従） |
 | `--vloc-all` | なし | 仮想クライアントどうしにも位置を送る（既定は実機にだけ送り，負荷を抑える） |
 | `--speed` | 1.0 | 実時間に対する進み方（実機を使うときは1.0のまま） |

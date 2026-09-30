@@ -37,7 +37,7 @@ while traci.simulation.getMinExpectedNumber() > 0:
         if v in targets: finish(v)
     if step % 2: continue          # 1秒ごと（アプリと同じ更新間隔）
     for v in traci.vehicle.getIDList():
-        x, y = traci.vehicle.getPosition(v); lon, lat = net.convertXY2LonLat(x, y)
+        x, y = common.vehicle_xy(traci, v); lon, lat = net.convertXY2LonLat(x, y)
         for j in targets.get(v, {}):
             targets[v][j] = min(targets[v][j], d((lat, lon), ix[j]))
 traci.close()

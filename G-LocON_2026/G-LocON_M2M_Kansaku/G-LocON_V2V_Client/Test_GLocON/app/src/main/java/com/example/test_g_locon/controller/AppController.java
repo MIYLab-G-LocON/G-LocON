@@ -579,6 +579,11 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
                     }
 
                     @Override
+                    public void onSimVehicles(List<com.example.test_g_locon.sim.SimVehicle> vehicles) {
+                        callback.onSimVehicles(vehicles);
+                    }
+
+                    @Override
                     public void onSimEnd(String vehicleId) {
                         routeExecutor.submit(() -> leaveAllIntersections());
                         callback.onSumoStatus("SUMO車両 " + vehicleId + " が到着。次の車を待っています");

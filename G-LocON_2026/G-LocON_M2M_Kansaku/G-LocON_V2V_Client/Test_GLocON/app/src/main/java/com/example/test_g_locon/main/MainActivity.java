@@ -355,12 +355,25 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             }
 
         } else if (id == R.id.displayButton) {
-            // 他車両の表示: 全て → 実機のみ → なし → 全て
-            displayMode = (displayMode + 1) % 3;
+            // 他車両の表示: P2P → 全車両 → 実機のみ → なし → P2P
+            displayMode = MapManager.nextDisplayMode(displayMode);
             mapManager.setDisplayMode(displayMode);
             displayButton.setText(displayLabel());
-            showToast(displayMode == MapManager.DISPLAY_ALL ? "他の車: 実機・仮想の両方を表示"
-                    : displayMode == MapManager.DISPLAY_REAL_ONLY ? "他の車: 実機だけ表示" : "他の車: 表示しない");
+            String msg;
+            switch (displayMode) {
+                case MapManager.DISPLAY_ALL:
+                    msg = "他の車: P2Pでつながった車だけ（実機・仮想）"; break;
+                case MapManager.DISPLAY_EVERYONE:
+                    msg = appController.isSumoMode()
+                            ? "他の車: 全車両（ピン=P2Pでつながった車，小さい矢印=つながっていない車／青は実機）"
+                            : "他の車: 全車両（つながっていない車の表示はSUMOモードのみ）";
+                    break;
+                case MapManager.DISPLAY_REAL_ONLY:
+                    msg = "他の車: P2Pでつながった実機だけ"; break;
+                default:
+                    msg = "他の車: 表示しない";
+            }
+            showToast(msg);
 
         } else if (id == R.id.angle) {
             // 地図の表示モードを切り替える: N↑（北が上・自車を追従）→ H↑（進行方向が上・地図が回る）
@@ -422,8 +435,12 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     }
 
     private String displayLabel() {
-        return displayMode == MapManager.DISPLAY_ALL ? "表示:全"
-                : displayMode == MapManager.DISPLAY_REAL_ONLY ? "表示:実機" : "表示:なし";
+        switch (displayMode) {
+            case MapManager.DISPLAY_ALL:       return "表示:P2P";
+            case MapManager.DISPLAY_EVERYONE:  return "表示:全車両";
+            case MapManager.DISPLAY_REAL_ONLY: return "表示:実機";
+            default:                           return "表示:なし";
+        }
     }
 
     @Override
@@ -457,6 +474,11 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     @Override
     public void onSumoStatus(String message) {
         showToast(message);
+    }
+
+    @Override
+    public void onSimVehicles(List<com.example.test_g_locon.sim.SimVehicle> vehicles) {
+        mapManager.updateAllVehicles(vehicles);
     }
 
     // =========================================================

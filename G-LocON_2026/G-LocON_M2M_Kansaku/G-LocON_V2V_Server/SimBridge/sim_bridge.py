@@ -17,6 +17,9 @@
     ブリッジ → スマホ  SIM_ROUTE      {vehicleId, intersections:[{intersectionId,lat,lon}], destLat, destLon}
                        SIM_LOCATION   {vehicleId, latitude, longitude, speed[m/s], bearing, simTime}（1秒ごと）
                        SIM_END        {vehicleId}         車が目的地に着いた（次の車が割り当てられる）
+                       SIM_VEHICLES   {vehicles:[[peerID, lat, lon, bearing, 実機なら1], ...]}（1秒ごと）
+                                      自車から --others-radius 以内の他の全車両（アプリの「表示:全車両」用。
+                                      peerID は実機ならその端末名，それ以外は "sim-<車両ID>"）
 
 ■ 仮想クライアント（--virtual）
     SUMOの車1台ごとに専用のUDPソケットを持ち，アプリと同じ手順・同じ形式で
@@ -89,7 +92,8 @@ class Bridge:
         self.phone_vehicles = {}            # vid -> Phone
         self.joined_truth = {}              # iid -> set(peerID)  ブリッジが把握するJOIN中の仮想クライアント
         self.changed = {}                   # (iid, peerID) -> 最後にJOIN/LEAVEしたシミュレーション時刻
-        self.es_index = {iid: k for k, iid in enumerate(sorted(common.read_sim_edge_servers()))}
+        # 色は edge_servers.csv の行（ポート）の順。--move で交差点を移しても色は変わらない
+        self.es_index = {iid: k for k, iid in enumerate(common.read_sim_edge_servers())}
         self.stats = {"join_sent": 0, "join_replied": 0, "join_rtt": [], "leave_sent": 0,
                       "peer_left_rx": 0, "nat_register_rx": 0, "check": 0, "match": 0,
                       "missing": 0, "extra": 0, "query_fail": 0}
@@ -200,6 +204,10 @@ class Bridge:
             self.mark_phone(vid, ph)
 
     def update_phones(self, arrived):
+        riding = [v for v in self.phone_vehicles if v not in arrived and v in self.alive]
+        pos = {}
+        if riding and self.a.others_radius > 0:
+            pos = {v: common.vehicle_xy(self.t, v) for v in self.alive}
         for vid in list(self.phone_vehicles):
             ph = self.phone_vehicles[vid]
             if vid in arrived or vid not in self.alive:
@@ -208,12 +216,28 @@ class Bridge:
                 ph.vid = None
                 del self.phone_vehicles[vid]
                 continue
-            x, y = self.t.vehicle.getPosition(vid)
+            x, y = common.vehicle_xy(self.t, vid)            # 車の中心（スマホは車内にある）
             lon, lat = self.net.convertXY2LonLat(x, y)
             self.send_phone(ph, {"processType": "SIM_LOCATION", "vehicleId": vid,
                                  "latitude": lat, "longitude": lon,
                                  "speed": self.t.vehicle.getSpeed(vid),
                                  "bearing": self.t.vehicle.getAngle(vid), "simTime": self.now()})
+            if pos:
+                self.send_others(ph, vid, pos)
+
+    def send_others(self, ph, vid, pos):
+        """自車の周りの全車両を送る（P2Pでつながっていない車も地図に出して違いを見るため）."""
+        x0, y0 = pos[vid]
+        r2 = self.a.others_radius ** 2
+        near = sorted((((x - x0) ** 2 + (y - y0) ** 2), v) for v, (x, y) in pos.items()
+                      if v != vid and (x - x0) ** 2 + (y - y0) ** 2 <= r2)[:300]
+        rows = []
+        for _, v in near:
+            lon, lat = self.net.convertXY2LonLat(*pos[v])
+            other = self.phone_vehicles.get(v)
+            rows.append([other.peer if other else f"sim-{v}", round(lat, 6), round(lon, 6),
+                         round(self.t.vehicle.getAngle(v)), 1 if other else 0])
+        self.send_phone(ph, {"processType": "SIM_VEHICLES", "vehicles": rows})
 
     # ---------- 仮想クライアント ----------
     def update_virtual(self, departed, arrived):
@@ -344,7 +368,7 @@ class VirtualClient:
 
     # アプリの UserInfo 相当
     def user(self):
-        x, y = self.br.t.vehicle.getPosition(self.vid)
+        x, y = common.vehicle_xy(self.br.t, self.vid)     # 車の中心（実機と同じ）
         lon, lat = self.br.net.convertXY2LonLat(x, y)
         return lat, lon
 
@@ -521,6 +545,8 @@ def main():
                     help="離脱円の半径 δ [m]（実機にも同じ値を送る）。評価では 30 / 60 / 100")
     ap.add_argument("--follow-phone", action="store_true",
                     help="sumo-gui の画面を実機が乗っている車に追従させる（乗り換えても追従する）")
+    ap.add_argument("--others-radius", type=float, default=400,
+                    help="実機へ送る周りの全車両の範囲 [m]（アプリの「表示:全車両」用。0で送らない）")
     ap.add_argument("--speed", type=float, default=1.0, help="実時間に対する進み方（1.0=実時間。動作確認用に大きくできる）")
     ap.add_argument("--duration", type=float, default=0, help="シミュレーション時間の上限[秒]（0=最後の車が着くまで）")
     ap.add_argument("--seed", type=int, default=1)
@@ -560,8 +586,8 @@ def main():
     traci.start(cmd)
     if a.gui:
         # エッジサーバのある交差点に，グループの色と同じ色の印（ES0〜）を置く
-        for k, iid in enumerate(sorted(common.read_sim_edge_servers())):
-            x, y = traci.junction.getPosition(common.read_sim_edge_servers()[iid])
+        for k, (iid, jid) in enumerate(common.read_sim_edge_servers().items()):   # 行（ポート）の順
+            x, y = traci.junction.getPosition(jid)
             col = PALETTE[k % len(PALETTE)] + (255,)
             # 円（半径15m）は縮小しても消えないよう多角形で描き，ラベル（ES番号）は印で表示する
             circle = [(x + 15 * math.cos(2 * math.pi * i / 24), y + 15 * math.sin(2 * math.pi * i / 24))

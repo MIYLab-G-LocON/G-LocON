@@ -80,4 +80,7 @@ public interface IAppController {
 
     /** [SUMOモード] 状態の通知（車の割り当て・到着など） */
     void onSumoStatus(String message);
+
+    /** [SUMOモード] 周りの全車両（P2Pでつながっていない車も含む。1秒ごと）。「表示:全車両」で使う */
+    void onSimVehicles(List<com.example.test_g_locon.sim.SimVehicle> vehicles);
 }

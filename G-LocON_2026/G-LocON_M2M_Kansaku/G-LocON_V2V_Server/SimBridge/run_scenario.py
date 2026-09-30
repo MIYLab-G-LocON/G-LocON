@@ -94,7 +94,7 @@ class Groups:
                     mem.discard(v)
                     self.logw.writerow([f"{now:.1f}", iid, v, "LEAVE_ARRIVED", ""])
             for v in vids:
-                vx, vy = t.vehicle.getPosition(v)
+                vx, vy = common.vehicle_xy(t, v)       # 車の中心（sim_bridge.py と同じ）
                 eu = ((vx - jx) ** 2 + (vy - jy) ** 2) ** 0.5
                 key = (iid, v)
                 prev = self.prev_dist.get(key)

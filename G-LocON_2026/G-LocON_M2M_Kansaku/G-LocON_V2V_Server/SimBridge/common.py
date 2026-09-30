@@ -1,4 +1,5 @@
 """SimBridge 共通設定・ユーティリティ."""
+import math
 import os
 import sys
 
@@ -68,6 +69,19 @@ def read_sim_edge_servers():
             iid, _ip, _port, jid = line.strip().split(",")[:4]
             res[iid] = jid
     return res
+
+
+def vehicle_xy(traci, vid):
+    """車の中心の座標（SUMO座標）.
+
+    SUMO の getPosition は車の先端（前のバンパー）の位置で，sumo-gui では車体がそこから後ろへ描かれる。
+    スマホは車内にあるので，アプリに渡す位置・仮想クライアントの判定には車の中心を使う
+    （先端のままだと，LEAVE した時点で車体の後ろ半分がまだ離脱円の中に見える）。
+    """
+    x, y = traci.vehicle.getPosition(vid)
+    a = math.radians(traci.vehicle.getAngle(vid))      # 北=0°，時計回り
+    h = traci.vehicle.getLength(vid) / 2.0
+    return x - h * math.sin(a), y - h * math.cos(a)
 
 
 def load_net():

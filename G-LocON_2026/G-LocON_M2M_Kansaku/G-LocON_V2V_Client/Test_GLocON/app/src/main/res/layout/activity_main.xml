@@ -332,7 +332,7 @@
         app:layout_constraintBottom_toTopOf="@id/end" />
 
     <!-- ========================================================
-         左下：他車両の表示切り替え（全て → 実機のみ → なし）
+         左下：他車両の表示切り替え（P2P → 全車両 → 実機のみ → なし）
          ======================================================== -->
     <com.google.android.material.button.MaterialButton
         android:id="@+id/displayButton"
@@ -341,7 +341,7 @@
         android:layout_height="48dp"
         android:layout_marginStart="16dp"
         android:layout_marginBottom="8dp"
-        android:text="表示:全"
+        android:text="表示:P2P"
         android:textSize="14sp"
         app:cornerRadius="24dp"
         app:strokeWidth="2dp"

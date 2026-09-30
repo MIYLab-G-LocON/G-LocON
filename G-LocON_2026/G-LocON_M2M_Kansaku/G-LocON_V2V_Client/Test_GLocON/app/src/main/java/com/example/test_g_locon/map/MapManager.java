@@ -15,6 +15,7 @@ import android.util.Log;
 import com.example.test_g_locon.main.UserInfo;
 import com.example.test_g_locon.navigation.Intersection;
 import com.example.test_g_locon.navigation.IntersectionManager;
+import com.example.test_g_locon.sim.SimVehicle;
 
 import org.osmdroid.util.GeoPoint;
 import org.osmdroid.views.MapView;
@@ -24,8 +25,10 @@ import org.osmdroid.views.overlay.Polyline;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -106,12 +109,25 @@ public class MapManager {
     private OnMarkerTapListener markerTapListener;
 
     // ---- 他車両の表示モード（SUMOモード用） ----
-    /** 実機・仮想車両をすべて表示 */
+    /** P2Pでつながった車（実機・仮想車両）をピンで表示 */
     public static final int DISPLAY_ALL = 0;
     /** 実機（P2Pでつながった本物の端末）だけ表示 */
     public static final int DISPLAY_REAL_ONLY = 1;
     /** 他車両を表示しない */
     public static final int DISPLAY_NONE = 2;
+    /** P2Pでつながった車（ピン）に加えて，つながっていない車も小さな矢印で表示（SUMOモードのみ） */
+    public static final int DISPLAY_EVERYONE = 3;
+    /** 表示ボタンを押したときの切り替え順: P2P → 全車両 → 実機のみ → なし → P2P */
+    public static int nextDisplayMode(int mode) {
+        switch (mode) {
+            case DISPLAY_ALL:      return DISPLAY_EVERYONE;
+            case DISPLAY_EVERYONE: return DISPLAY_REAL_ONLY;
+            case DISPLAY_REAL_ONLY: return DISPLAY_NONE;
+            default:               return DISPLAY_ALL;
+        }
+    }
+    /** つながっていない車を描くオーバーレイ（DISPLAY_EVERYONE のときだけ中身を持つ） */
+    private final AllVehiclesOverlay allVehiclesOverlay;
     /** SimBridge の仮想クライアントの peerID の接頭辞 */
     public static final String VIRTUAL_PREFIX = "sim-";
     private volatile int displayMode = DISPLAY_ALL;
@@ -129,6 +145,7 @@ public class MapManager {
     /** 表示モードを切り替える。非表示になった車両のピンはすぐに消す */
     public void setDisplayMode(int mode) {
         displayMode = mode;
+        if (mode != DISPLAY_EVERYONE) allVehiclesOverlay.clear();
         final List<MarkerInfo> toRemove = new ArrayList<>();
         synchronized (markerList) {
             for (MarkerInfo info : markerList) {
@@ -151,6 +168,25 @@ public class MapManager {
     public MapManager(Context context, MapView mapView) {
         this.context = context;
         this.mapView = mapView;
+        this.allVehiclesOverlay = new AllVehiclesOverlay(context.getResources().getDisplayMetrics().density);
+        mapView.getOverlays().add(allVehiclesOverlay);
+    }
+
+    /**
+     * [SUMOモード] SimBridge から届いた周りの全車両（1秒ごと）。「表示:全車両」のときだけ描く。
+     * P2Pでつながってピンが出ている車は矢印を描かない。
+     */
+    public void updateAllVehicles(final List<SimVehicle> vehicles) {
+        if (displayMode != DISPLAY_EVERYONE) return;
+        final Set<String> pinned = new HashSet<>();
+        synchronized (markerList) {
+            for (MarkerInfo info : markerList) pinned.add(info.getPeerId());
+        }
+        uiHandler.post(() -> {
+            if (displayMode != DISPLAY_EVERYONE) return;
+            allVehiclesOverlay.setVehicles(vehicles, pinned);
+            mapView.invalidate();
+        });
     }
 
     /** マーカタップ時のリスナーを設定する */
@@ -168,6 +204,9 @@ public class MapManager {
             myLocationMarker = new Marker(mapView);
             myLocationMarker.setIcon(new BitmapDrawable(context.getResources(), arrowBitmap));
             myLocationMarker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER);
+            // 向きを地図に対して決める（flat）。flat でないと向きが画面に対してになり，
+            // H↑（地図が回る）で矢印が進行方向からずれていた
+            myLocationMarker.setFlat(true);
             myLocationMarker.setInfoWindow(null);
             mapView.getOverlays().add(myLocationMarker);
         });
@@ -178,7 +217,8 @@ public class MapManager {
         uiHandler.post(() -> {
             if (myLocationMarker == null) return;
             myLocationMarker.setPosition(new GeoPoint(lat, lng));
-            myLocationMarker.setRotation(-bearing); // osmdroidは反時計回り正
+            // osmdroidは反時計回り正。flat なので地図上の向き（北=0）で指定すれば，どの表示モードでも先端が進行方向を向く
+            myLocationMarker.setRotation(-bearing);
             mapView.invalidate();
         });
     }
@@ -388,6 +428,13 @@ public class MapManager {
                 if (i.hasEdgeServer()) {
                     addIntersectionMarker(i, i.isJoined());
                 }
+            }
+            // 他の車の矢印と自車の矢印がルートの線に隠れないよう，最前面に置き直す
+            mapView.getOverlays().remove(allVehiclesOverlay);
+            mapView.getOverlays().add(allVehiclesOverlay);
+            if (myLocationMarker != null) {
+                mapView.getOverlays().remove(myLocationMarker);
+                mapView.getOverlays().add(myLocationMarker);
             }
             mapView.invalidate();
             Log.d(TAG, "ルート描画完了: 交差点数=" + intersections.size());

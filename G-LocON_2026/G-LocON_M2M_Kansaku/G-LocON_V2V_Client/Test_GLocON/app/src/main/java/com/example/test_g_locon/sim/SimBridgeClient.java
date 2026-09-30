@@ -25,6 +25,7 @@ import java.util.List;
  * やりとり（UDP, 既定ポート 55700）:
  *   端末 → SimBridge : SIM_HELLO（割り当てまで2秒ごと）/ SIM_ROUTE_REQ / SIM_BYE
  *   SimBridge → 端末 : SIM_ROUTE（ルート上の交差点）/ SIM_LOCATION（1秒ごと）/ SIM_END（目的地到着）
+ *                      SIM_VEHICLES（周りの全車両，1秒ごと。「表示:全車両」用）
  *
  * P2P用のソケットとは別のソケットを使う（SimBridge との制御通信を P2P の受信処理と混ぜないため）。
  */
@@ -40,6 +41,8 @@ public class SimBridgeClient implements Runnable {
         void onSimLocation(double lat, double lng, double speedMps, double bearing);
         /** 車が目的地に着いた（次の車の割り当てを待つ） */
         void onSimEnd(String vehicleId);
+        /** 周りの全車両（P2Pでつながっていない車も含む。1秒ごと） */
+        default void onSimVehicles(List<SimVehicle> vehicles) {}
     }
 
     private final String bridgeIp;
@@ -147,6 +150,18 @@ public class SimBridgeClient implements Runnable {
                 }
                 listener.onSimLocation(m.getDouble("latitude"), m.getDouble("longitude"),
                         m.getDouble("speed"), m.getDouble("bearing"));
+                break;
+            }
+            case "SIM_VEHICLES": {
+                // [[peerID, 緯度, 経度, 進行方向, 実機なら1], ...]
+                JSONArray arr = m.getJSONArray("vehicles");
+                List<SimVehicle> list = new ArrayList<>(arr.length());
+                for (int i = 0; i < arr.length(); i++) {
+                    JSONArray v = arr.getJSONArray(i);
+                    list.add(new SimVehicle(v.getString(0), v.getDouble(1), v.getDouble(2),
+                            (float) v.getDouble(3), v.getInt(4) == 1));
+                }
+                listener.onSimVehicles(list);
                 break;
             }
             case "SIM_END": {
