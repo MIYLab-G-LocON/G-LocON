@@ -490,7 +490,7 @@ python start_servers.py --stun --csv ..\MasterServer\edge_servers.csv   # 固定
 ```
 
 - ウィンドウに JOIN / LEAVE が時刻・ポート付きで流れる（`--show all` で全出力，`--show none` で非表示）．
-  スマホで「開始」を押すと `[STUNServer] STUNServer;getMsg:Hello` が出る（出なければスマホの通信がPCに届いていない → 9.2）
+  スマホで「開始」を押すと `[STUNServer] スマホが接続（STUN）: IP>> ...` が出る（出なければスマホの通信がPCに届いていない → 9.2）
 - 全出力はサーバごとに `SimBridge/out/servers/EdgeServer_<ポート>.log`，`MasterServer.log`，`STUNServer.log` に時刻付きで保存される．
   1つのサーバだけ追う場合は PowerShell で `Get-Content out\servers\EdgeServer_55600.log -Wait -Tail 20`
 - Ctrl+C で全サーバを終了する
@@ -711,6 +711,8 @@ CSVには全交差点を記載し，起動するEdgeServerの行だけ有効に�
 **症状**: サーバのログに `BindException` / `Address already in use`，または `start_servers.py` で「起動に失敗したもの」に出る．
 
 **原因**: 前に起動したサーバ（IntelliJ・バッチファイル・前回の `start_servers.py`）が残っていて，同じポートを使っている．
+`start_servers.py` は起動前にポートを調べ，使われていれば「起動できません: 次のポートが既に使われています」と出して止まる．
+**STUNServer だけ起動に失敗していると，他のサーバは動いていてもスマホが「サーバに接続できません」のままになる**ので注意（「起動に失敗したもの」の表示を確認する）．
 
 **対処**: 残っているサーバを閉じる．見つからない場合は PowerShell で java を一覧し，古いものを終了する．
 
