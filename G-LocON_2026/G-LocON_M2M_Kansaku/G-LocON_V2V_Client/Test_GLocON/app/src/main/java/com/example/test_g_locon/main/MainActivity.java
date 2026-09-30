@@ -4,6 +4,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 
 import android.content.pm.PackageManager;
+import android.content.res.ColorStateList;
 import android.location.Location;
 import android.os.Bundle;
 import android.os.Handler;
@@ -11,6 +12,7 @@ import android.os.Looper;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.EditText;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import com.example.test_g_locon.R;
@@ -18,7 +20,9 @@ import com.example.test_g_locon.controller.AppController;
 import com.example.test_g_locon.controller.IAppController;
 import com.example.test_g_locon.map.MapManager;
 import com.example.test_g_locon.navigation.Intersection;
+import com.example.test_g_locon.navigation.IntersectionManager;
 import com.google.android.material.button.MaterialButton;
+import com.google.android.material.button.MaterialButtonToggleGroup;
 import com.google.android.material.card.MaterialCardView;
 
 import android.graphics.Bitmap;
@@ -37,6 +41,8 @@ import java.net.DatagramSocket;
 import java.net.SocketException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * アプリのメイン画面を担う Activity クラス。
@@ -45,11 +51,10 @@ import java.util.List;
  *   - 旧: 固定サイズの MapView + 画面下部にボタン群
  *   - 新: MapView 全画面 + フローティング UI（現代の地図アプリ準拠）
  *
- * ボタン配置の設計方針（人間工学）:
- *   - 入力カード:  画面上部中央（起動直後に視認しやすい位置）
- *   - ズーム +/-:  右下（利き手の親指で届く位置、OSMand/Google Maps と同じ）
- *   - コンパス:    右上（誤操作しにくい位置）
- *   - 終了ボタン:  左下（ズーム操作と干渉しない場所、かつ誤タップを防ぐ）
+ * 画面構成（ナビアプリ風）:
+ *   - 上:   開始前は Peer ID 入力カード，開始後は状態カード（走行モード・参加中のグループ・つながっている車・離脱円）
+ *   - 右:   コンパス（N↑/H↑/固定）とズーム
+ *   - 下:   操作パネル（他の車の表示の切り替え＋ SUMO / SIM / 仮想位置 / 目的地 / 終了）
  *
  * 初期ズームを 4（大陸スケール）に変更。
  */
@@ -68,8 +73,19 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private MaterialButton simButton;    // 仮想走行ボタン
     private MaterialButton virtPosButton; // 仮想位置ボタン
     private MaterialButton sumoButton;    // SUMOモード開始ボタン
-    private MaterialButton displayButton; // 他車両の表示モード切り替え
+    private MaterialButton destButton;    // 目的地入力カードを開く
+    private MaterialButtonToggleGroup displayToggle; // 他車両の表示（P2P / 全車両 / 実機 / なし）
     private int displayMode = MapManager.DISPLAY_ALL;
+    // ---- 状態カード ----
+    private MaterialCardView statusCard;
+    private MaterialCardView bottomPanel;
+    private View statusDot;
+    private TextView statusTitle;
+    private TextView statusSub;
+    /** 参加中の交差点グループ */
+    private final Set<String> joinedIds = ConcurrentHashMap.newKeySet();
+    /** P2Pでつながっている車の数（実機／仮想） */
+    private volatile int realPeers = 0, virtualPeers = 0;
     private MaterialCardView inputCard;   // peerId入力カード（開始後に非表示）
     private MaterialCardView routeCard;  // 目的地入力カード（開始後に表示）
     private MapView mapView;
@@ -151,9 +167,18 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         simButton     = findViewById(R.id.simButton);
         virtPosButton = findViewById(R.id.virtPosButton);
         sumoButton    = findViewById(R.id.sumoButton);
-        displayButton = findViewById(R.id.displayButton);
+        destButton    = findViewById(R.id.destButton);
+        displayToggle = findViewById(R.id.displayToggle);
+        statusCard    = findViewById(R.id.statusCard);
+        bottomPanel   = findViewById(R.id.bottomPanel);
+        statusDot     = findViewById(R.id.statusDot);
+        statusTitle   = findViewById(R.id.statusTitle);
+        statusSub     = findViewById(R.id.statusSub);
         sumoButton.setOnClickListener(this);
-        displayButton.setOnClickListener(this);
+        destButton.setOnClickListener(this);
+        displayToggle.addOnButtonCheckedListener((group, checkedId, isChecked) -> {
+            if (isChecked) onDisplaySelected(checkedId);
+        });
 
         start.setOnClickListener(this);
         end.setOnClickListener(this);
@@ -268,6 +293,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             inputCard.setVisibility(View.GONE);
             routeCard.setVisibility(View.VISIBLE); // 目的地入力カードを表示
             end.setVisibility(View.VISIBLE);
+            statusCard.setVisibility(View.VISIBLE);
+            bottomPanel.setVisibility(View.VISIBLE);
+            setMode("現在地（GPS）", R.color.mode_gps);
 
             // [変更] START後に即座にナビズーム (15) へ切り替え
             cameraLevel = 18.0f;
@@ -327,15 +355,19 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             appController.setVirtualPosition(TEST_LATITUDE, TEST_LONGITUDE);
             cameraLevel = 18.0f;
             mapView.getController().setZoom((double) cameraLevel);
-            showToast("仮想位置に移動しました");
+            if (!appController.isSumoMode()) setMode("仮想位置（実験場所）", R.color.mode_gps);
 
         } else if (id == R.id.simButton) {
-            if (appController.isSimulating()) {
+            if (appController.isSumoMode()) {
+                showToast("SUMOモード中は使えません");
+            } else if (appController.isSimulating()) {
                 appController.stopSimulation();
-                simButton.setText("SIM");
+                setSimButton(false);
+                setMode("現在地（GPS）", R.color.mode_gps);
             } else {
                 appController.startSimulation();
-                simButton.setText("SIM停止");
+                setSimButton(true);
+                setMode("仮想走行中（SIM）", R.color.mode_sim);
             }
 
         } else if (id == R.id.sumoButton) {
@@ -344,36 +376,23 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 showToast("SUMOモード実行中です");
             } else if (appController.startSumoMode(SERVER_IP)) {
                 appController.stopSimulation();
-                simButton.setText("SIM");
+                setSimButton(false);
                 routeCard.setVisibility(View.GONE);
                 sumoButton.setText("SUMO中");
                 cameraLevel = 17.0f;
                 mapView.getController().setZoom((double) cameraLevel);
-                showToast("SimBridge に接続中...（PCで sim_bridge.py を起動しておくこと）");
+                setMode("SimBridge に接続中…", R.color.mode_sumo);
             } else {
                 showToast("先に「開始」で通信を始めてください");
             }
 
-        } else if (id == R.id.displayButton) {
-            // 他車両の表示: P2P → 全車両 → 実機のみ → なし → P2P
-            displayMode = MapManager.nextDisplayMode(displayMode);
-            mapManager.setDisplayMode(displayMode);
-            displayButton.setText(displayLabel());
-            String msg;
-            switch (displayMode) {
-                case MapManager.DISPLAY_ALL:
-                    msg = "他の車: P2Pでつながった車だけ（実機・仮想）"; break;
-                case MapManager.DISPLAY_EVERYONE:
-                    msg = appController.isSumoMode()
-                            ? "他の車: 全車両（ピン=P2Pでつながった車，小さい矢印=つながっていない車／青は実機）"
-                            : "他の車: 全車両（つながっていない車の表示はSUMOモードのみ）";
-                    break;
-                case MapManager.DISPLAY_REAL_ONLY:
-                    msg = "他の車: P2Pでつながった実機だけ"; break;
-                default:
-                    msg = "他の車: 表示しない";
+        } else if (id == R.id.destButton) {
+            // 目的地入力カードを開く／閉じる（SUMOモードではSUMO側のルートを使うので使わない）
+            if (appController.isSumoMode()) {
+                showToast("SUMOモードではSUMOの車のルートを使います");
+            } else {
+                routeCard.setVisibility(routeCard.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE);
             }
-            showToast(msg);
 
         } else if (id == R.id.angle) {
             // 地図の表示モードを切り替える: N↑（北が上・自車を追従）→ H↑（進行方向が上・地図が回る）
@@ -425,39 +444,76 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     @Override
     public void onPeripheralUsersRefreshed(ArrayList<UserInfo> allPeripheralUsers) {
         mapManager.removeStaleMarkers(allPeripheralUsers);
-        // 表示ボタンに，今のグループの車の数（実機／仮想）を出す
+        // 状態カードに，今のグループの車の数（実機／仮想）を出す
         int real = 0, virt = 0;
         for (UserInfo u : allPeripheralUsers) {
             if (MapManager.isVirtual(u.getPeerId())) virt++; else real++;
         }
-        final String counts = "(実" + real + "/仮" + virt + ")";
-        runOnUiThread(() -> displayButton.setText(displayLabel() + counts));
+        realPeers = real;
+        virtualPeers = virt;
+        updateStatus();
     }
 
-    private String displayLabel() {
-        switch (displayMode) {
-            case MapManager.DISPLAY_ALL:       return "表示:P2P";
-            case MapManager.DISPLAY_EVERYONE:  return "表示:全車両";
-            case MapManager.DISPLAY_REAL_ONLY: return "表示:実機";
-            default:                           return "表示:なし";
+    /** 他の車の表示の切り替え（下の操作パネル） */
+    private void onDisplaySelected(int checkedId) {
+        if (checkedId == R.id.dispAll) {
+            displayMode = MapManager.DISPLAY_EVERYONE;
+            showToast(appController != null && appController.isSumoMode()
+                    ? "ピン = P2Pでつながった車，小さい矢印 = つながっていない車（青は実機）"
+                    : "つながっていない車の表示はSUMOモードのときだけです");
+        } else if (checkedId == R.id.dispReal) {
+            displayMode = MapManager.DISPLAY_REAL_ONLY;
+        } else if (checkedId == R.id.dispNone) {
+            displayMode = MapManager.DISPLAY_NONE;
+        } else {
+            displayMode = MapManager.DISPLAY_ALL;
         }
+        mapManager.setDisplayMode(displayMode);
+    }
+
+    /** 状態カードの1行目（走行モード）と丸の色 */
+    private void setMode(String title, int colorRes) {
+        runOnUiThread(() -> {
+            statusTitle.setText(title);
+            statusDot.setBackgroundTintList(ColorStateList.valueOf(getColor(colorRes)));
+        });
+        updateStatus();
+    }
+
+    /** 状態カードの2行目: 参加中のグループ・つながっている車・離脱円 */
+    private void updateStatus() {
+        final String sub = "グループ " + joinedIds.size()
+                + " ・ つながっている車 実機" + realPeers + " / 仮想" + virtualPeers
+                + " ・ 離脱円 " + Math.round(IntersectionManager.getLeaveThresholdM()) + "m";
+        runOnUiThread(() -> statusSub.setText(sub));
+    }
+
+    /** SIMボタンの表示（走行中は「停止」） */
+    private void setSimButton(boolean running) {
+        simButton.setText(running ? "停止" : "SIM");
+        simButton.setIconResource(running ? R.drawable.ic_stop : R.drawable.ic_play);
     }
 
     @Override
     public void onRouteLoaded(List<Intersection> intersections) {
         mapManager.drawRoute(intersections);
-        showToast("ルート取得完了: 交差点数=" + intersections.size());
+        joinedIds.clear();
+        updateStatus();
+        if (!appController.isSumoMode()) showToast("ルート取得完了: 交差点数=" + intersections.size());
     }
 
     @Override
     public void onIntersectionJoined(Intersection intersection) {
         mapManager.updateIntersectionMarkerJoined(intersection);
-        // Toast はLogcatで確認するため表示しない（スパム防止）
+        joinedIds.add(intersection.getIntersectionId());
+        updateStatus();
     }
 
     @Override
     public void onIntersectionLeft(Intersection intersection) {
         mapManager.updateIntersectionMarkerLeft(intersection);
+        joinedIds.remove(intersection.getIntersectionId());
+        updateStatus();
     }
 
     @Override
@@ -473,7 +529,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
     @Override
     public void onSumoStatus(String message) {
-        showToast(message);
+        // 車の割り当て・到着は状態カードの1行目に出す（トーストは出さない）
+        setMode(message, R.color.mode_sumo);
     }
 
     @Override

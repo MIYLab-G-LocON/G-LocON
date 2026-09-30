@@ -84,6 +84,16 @@ def vehicle_xy(traci, vid):
     return x - h * math.sin(a), y - h * math.cos(a)
 
 
+def gui_vehicle_exaggeration():
+    """gui_settings.xml の車の拡大率（vehicle_exaggeration）. 見つからなければ 1."""
+    import xml.etree.ElementTree as ET
+    try:
+        v = ET.parse(os.path.join(HERE, "gui_settings.xml")).getroot().find(".//vehicles")
+        return float(v.get("vehicle_exaggeration", 1.0))
+    except Exception:
+        return 1.0
+
+
 def load_net():
     sumo_home()
     import sumolib

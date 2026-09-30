@@ -1,7 +1,14 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Base application theme. -->
-    <style name="Base.Theme.Test_GLocON" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your dark theme here. -->
-        <!-- <item name="colorPrimary">@color/my_dark_primary</item> -->
+    <!-- ダークモードでも values/themes.xml と同じ明るいテーマを使う -->
+    <!-- 地図の上に白いパネルを浮かべるデザインなので，ダークモードでも明るいテーマに固定する -->
+    <style name="Base.Theme.Test_GLocON" parent="Theme.Material3.Light.NoActionBar">
+        <item name="colorPrimary">@color/map_primary</item>
+        <item name="colorOnPrimary">@color/map_on_primary</item>
+        <!-- 表示切り替え（ToggleGroup）の選択中の色 -->
+        <item name="colorSecondaryContainer">@color/toggle_checked_bg</item>
+        <item name="colorOnSecondaryContainer">@color/map_primary</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="colorOutline">@color/panel_stroke</item>
     </style>
+
 </resources>

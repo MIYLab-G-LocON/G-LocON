@@ -50,6 +50,7 @@ MIN_SPEED = 1.0           # アプリと同じ（ETA計算の最低速度）
 PASS_RADIUS_M = 20.0      # アプリと同じ: この距離まで近づいたら交差点を「通過済み」とする
 PASS_LOOKAHEAD = 3        # アプリと同じ: 通過判定はまだ通過していない最初の交差点からこの個数先まで
 GRACE_SEC = 2.0           # 一覧の一致判定で，直近のJOIN/LEAVEを通知待ちとして除外する時間
+PENDING_MAX_SEC = 15.0    # 表示の色替えを待つ最大時間（止まった車などで尻尾が円から出ない場合）
 PALETTE = [(230, 25, 75), (60, 180, 75), (255, 225, 25), (0, 130, 200), (245, 130, 48),
            (145, 30, 180), (70, 240, 240), (240, 50, 230), (210, 245, 60), (0, 128, 128)]
 
@@ -94,6 +95,13 @@ class Bridge:
         self.changed = {}                   # (iid, peerID) -> 最後にJOIN/LEAVEしたシミュレーション時刻
         # 色は edge_servers.csv の行（ポート）の順。--move で交差点を移しても色は変わらない
         self.es_index = {iid: k for k, iid in enumerate(common.read_sim_edge_servers())}
+        self.es_xy = {}                     # iid -> 交差点のSUMO座標（色替えの判定用）
+        # LEAVE後の色替え待ち: vid -> (色, 離れた交差点のiid, 待ち始めた時刻)
+        # sumo-gui は車を vehicle_exaggeration 倍に拡大して先端から後ろへ描くため，
+        # LEAVE（車の中心で判定）した時点では描かれた車の後ろがまだ離脱円の中に見える。
+        # 表示だけ，描かれた車の後端が円を出るまで色替えを待つ（LEAVEの送信・記録のタイミングは変えない）
+        self.pending_color = {}
+        self.exaggeration = common.gui_vehicle_exaggeration() if a.gui else 1.0
         self.stats = {"join_sent": 0, "join_replied": 0, "join_rtt": [], "leave_sent": 0,
                       "peer_left_rx": 0, "nat_register_rx": 0, "check": 0, "match": 0,
                       "missing": 0, "extra": 0, "query_fail": 0}
@@ -292,6 +300,29 @@ class Bridge:
             pass
 
     # ---------- sumo-gui の色分け ----------
+    def color_after_leave(self, vid, kind, left_iid):
+        """LEAVE 後の色替え。描かれた車の後端が離脱円を出てから替える（表示のみ）."""
+        if not self.a.gui:
+            return
+        self.pending_color[vid] = (kind, left_iid, self.now())
+        self.update_pending_colors()
+
+    def update_pending_colors(self):
+        for vid, (kind, iid, t0) in list(self.pending_color.items()):
+            if vid not in self.alive:
+                del self.pending_color[vid]
+                continue
+            if iid not in self.es_xy:
+                self.es_xy[iid] = self.t.junction.getPosition(common.read_sim_edge_servers()[iid])
+            jx, jy = self.es_xy[iid]
+            x, y = self.t.vehicle.getPosition(vid)                    # 先端
+            a = math.radians(self.t.vehicle.getAngle(vid))
+            drawn = self.t.vehicle.getLength(vid) * self.exaggeration   # 描かれている車の長さ
+            tx, ty = x - drawn * math.sin(a), y - drawn * math.cos(a)  # 描かれた車の後端
+            if math.hypot(tx - jx, ty - jy) >= common.LEAVE_DIST_M or self.now() - t0 > PENDING_MAX_SEC:
+                del self.pending_color[vid]
+                self.set_color(vid, kind)
+
     def set_color(self, vid, kind):
         if not self.a.gui or vid not in self.alive:
             return
@@ -322,6 +353,7 @@ class Bridge:
                 arrived = set(t.simulation.getArrivedIDList())
                 for vid in departed:
                     self.set_color(vid, None)
+                self.update_pending_colors()
                 self.assign_phones(departed)
                 if self.a.virtual:
                     self.update_virtual(departed, arrived)
@@ -431,6 +463,7 @@ class VirtualClient:
                     br.changed[(it.iid, self.peer)] = br.now()
                     br.stats["join_sent"] += 1
                     br.log("V_JOIN", self.peer, it.iid, f"eta={eta:.1f}")
+                    br.pending_color.pop(self.vid, None)     # 前の交差点の色替え待ちは取り消す
                     br.set_color(self.vid, it.iid)
                     self.show_state()
             elif it.joined and it.should_leave():
@@ -480,7 +513,7 @@ class VirtualClient:
         br.stats["leave_sent"] += 1
         br.log(ev, self.peer, it.iid, f"dist={it.dist:.0f}")
         others = [i for i in self.ix.values() if i.joined]
-        br.set_color(self.vid, others[0].iid if others else None)
+        br.color_after_leave(self.vid, others[0].iid if others else None, it.iid)
         self.show_state()
 
     def on_message(self, msg, addr):
