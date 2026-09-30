@@ -14,6 +14,7 @@ import android.util.Log;
 
 import com.example.test_g_locon.main.UserInfo;
 import com.example.test_g_locon.navigation.Intersection;
+import com.example.test_g_locon.navigation.IntersectionManager;
 
 import org.osmdroid.util.GeoPoint;
 import org.osmdroid.views.MapView;
@@ -74,7 +75,6 @@ public class MapManager {
     private final List<MarkerInfo> markerList = new ArrayList<>();
 
     /** 検索範囲を示す円ポリゴン */
-    private Polygon searchCircle = null;
 
     // ---- 自位置マーカー ----
     private Marker myLocationMarker = null;
@@ -84,6 +84,8 @@ public class MapManager {
     private Polyline routePolyline = null;
     /** 交差点マーカー: intersectionId → Marker */
     private final Map<String, Marker> intersectionMarkers = new HashMap<>();
+    /** エッジサーバ交差点の離脱円（半径 = IntersectionManager.LEAVE_THRESHOLD_M）: intersectionId → Polygon */
+    private final Map<String, Polygon> leaveCircles = new HashMap<>();
     /** 交差点マーカー色: JOIN前=グレー, JOIN中=緑 */
     private static final int COLOR_INTERSECTION_DEFAULT = Color.rgb(150, 150, 150); // グレー
     private static final int COLOR_INTERSECTION_JOINED  = Color.rgb(0, 200, 80);   // 緑
@@ -213,15 +215,9 @@ public class MapManager {
             // osmdroid は Google Maps と符号が逆なので反転する
             mapView.setMapOrientation(-bearing);
 
-            // 検索範囲の円ポリゴンを更新
-            if (searchCircle == null) {
-                searchCircle = new CreateCircle().createCirclePolygon(location, searchRange);
-                mapView.getOverlays().add(searchCircle);
-            } else {
-                // 既存ポリゴンの点列を新しい中心座標で更新
-                List<GeoPoint> circlePoints = Polygon.pointsAsCircle(location, searchRange);
-                searchCircle.setPoints(circlePoints);
-            }
+            // [変更] 旧G-LocONの検索範囲の円（自車中心・半径200m）は表示しない。
+            //        V2V版では周辺車両を距離で探さず，交差点グループで決めるため意味がない。
+            //        代わりにエッジサーバ交差点に離脱円を描く（drawRoute）
 
             mapView.invalidate(); // 再描画
         });
@@ -353,11 +349,15 @@ public class MapManager {
             if (routePolyline != null) {
                 mapView.getOverlays().remove(routePolyline);
             }
-            // 既存交差点マーカーを削除
+            // 既存交差点マーカー・離脱円を削除
             for (Marker m : intersectionMarkers.values()) {
                 mapView.getOverlays().remove(m);
             }
             intersectionMarkers.clear();
+            for (Polygon c : leaveCircles.values()) {
+                mapView.getOverlays().remove(c);
+            }
+            leaveCircles.clear();
 
             // ルートライン描画
             List<GeoPoint> points = new ArrayList<>();
@@ -370,10 +370,23 @@ public class MapManager {
             routePolyline.getOutlinePaint().setStrokeWidth(8f);
             mapView.getOverlays().add(routePolyline);
 
+            // 離脱円（エッジサーバ交差点のみ）: この円の外に出て遠ざかるとLEAVEする。マーカーより下に描く
+            for (Intersection i : intersections) {
+                if (i.hasEdgeServer()) {
+                    Polygon c = new Polygon();
+                    c.setPoints(Polygon.pointsAsCircle(new GeoPoint(i.getLat(), i.getLng()),
+                            IntersectionManager.LEAVE_THRESHOLD_M));
+                    styleLeaveCircle(c, i.isJoined());
+                    c.setInfoWindow(null);
+                    mapView.getOverlays().add(c);
+                    leaveCircles.put(i.getIntersectionId(), c);
+                }
+            }
+
             // 交差点マーカー描画（エッジサーバが登録されている交差点のみ）
             for (Intersection i : intersections) {
                 if (i.hasEdgeServer()) {
-                    addIntersectionMarker(i, false);
+                    addIntersectionMarker(i, i.isJoined());
                 }
             }
             mapView.invalidate();
@@ -413,9 +426,19 @@ public class MapManager {
             if (marker != null) {
                 marker.setIcon(createSmallCircleIcon(
                         joined ? COLOR_INTERSECTION_JOINED : COLOR_INTERSECTION_DEFAULT));
-                mapView.invalidate();
             }
+            Polygon circle = leaveCircles.get(intersectionId);
+            if (circle != null) styleLeaveCircle(circle, joined);
+            mapView.invalidate();
         });
+    }
+
+    /** 離脱円の色: JOIN中は緑，それ以外は灰色（半透明の塗り＋枠線） */
+    private void styleLeaveCircle(Polygon c, boolean joined) {
+        int base = joined ? COLOR_INTERSECTION_JOINED : COLOR_INTERSECTION_DEFAULT;
+        c.getFillPaint().setColor(Color.argb(50, Color.red(base), Color.green(base), Color.blue(base)));
+        c.getOutlinePaint().setColor(base);
+        c.getOutlinePaint().setStrokeWidth(3f);
     }
 
     /** 交差点マーカー用アイコンを生成する（デフォルト:オレンジ六角形, JOIN中:黄色） */

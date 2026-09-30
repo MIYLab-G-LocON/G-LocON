@@ -36,8 +36,9 @@ public class IntersectionManager {
     }
 
     private static final double ETA_THRESHOLD_SEC = 30.0;
-    private static final double LEAVE_THRESHOLD_M = 30.0;
-    private static final double PASS_RADIUS_M     = 20.0;
+    /** 地図に描く離脱円の半径にも使う（MapManager） */
+    public  static final double LEAVE_THRESHOLD_M = 30.0;
+    public  static final double PASS_RADIUS_M     = 20.0;
     private static final int    PASS_LOOKAHEAD    = 3;
     private static final double MIN_SPEED_MPS     = 1.0; // ETA計算の最低速度（停止中の除算エラー防止）
 
