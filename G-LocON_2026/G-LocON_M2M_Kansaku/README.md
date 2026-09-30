@@ -439,7 +439,7 @@ V2Vあり vs V2Vなしを比較し，交通安全・効率への貢献を評価�
    EdgeServerRegistry: 3件 ロード完了
    MasterServer 起動: port=55556 エッジサーバ登録数=3
    ```
-   ※ `edge_servers.csv` にはルート上の全交差点を記載しているが，EdgeServerを設置する3か所（ES1〜ES3）以外は `#` で無効化しているため3件となる（9.5参照）．
+   ※ `edge_servers.csv` にはルート上の全交差点を記載しているが，EdgeServerを設置する3か所（ES1〜ES3）以外は `#` で無効化しているため3件となる（9.6参照）．
 
 #### EdgeServer の起動
 
@@ -489,7 +489,8 @@ python sim_bridge.py --phones 1 --virtual --gui --leave-dist 100   # 離脱円 �
 
 **グループのJOIN/LEAVEの確認**（IntelliJ を使わない場合）
 
-- `start_servers.py` のウィンドウに，各エッジサーバの JOIN / LEAVE が時刻・ポート付きで流れる（`--show all` で全出力，`--show none` で非表示）
+- `start_servers.py` のウィンドウに，各エッジサーバの JOIN / LEAVE が時刻・ポート付きで流れる（`--show all` で全出力，`--show none` で非表示）．
+  スマホで「開始」を押すと `[STUNServer] STUNServer;getMsg:Hello` が出る（出なければスマホの通信がPCに届いていない）
 - 全出力はサーバごとに `SimBridge/out/servers/EdgeServer_<ポート>.log`，`MasterServer.log` に時刻付きで保存される．
   1つのサーバだけ追う場合は PowerShell で `Get-Content out\servers\EdgeServer_55600.log -Wait -Tail 20`
 - SimBridge 側の記録は `SimBridge/out/live_<日時>_d<δ>/`（`events.csv` に JOIN/LEAVE，`summary.txt` に集計）
@@ -518,7 +519,21 @@ netsh advfirewall firewall add rule name="G-LocON UDP IN" protocol=UDP dir=in lo
 
 ---
 
-### 9.2 ネットワーク・IPアドレス設定
+### 9.2 「開始」を押しても地図が現在地に移らない
+
+**症状**: 「開始」後，状態カードが「サーバに接続できません」のまま，地図が初期位置のまま動かない．
+
+**原因**: 位置の取得（GPS）は STUN サーバから返事が来た後に始まる．スマホの通信がPCに届いていないと現在地に移らない．
+よくあるのは，**PCのモバイルホットスポットが自動でオフになり**，スマホがモバイル通信や別のWi-Fiに切り替わっている場合
+（Windows は端末がつながっていない状態が続くとホットスポットを自動で切る）．
+
+**対処**: PCの「設定 → ネットワークとインターネット → モバイルホットスポット」でオンにし，スマホをつなぎ直す．
+同じ画面の「省電力（デバイスが接続されていないときにホットスポットをオフにする）」をオフにしておくと再発しない．
+`start_servers.py --stun` で STUN が起動していることも確認する．アプリは20秒ごとに送り直すので，直せば再起動しなくてもつながる．
+
+---
+
+### 9.3 ネットワーク・IPアドレス設定
 
 **症状**: AndroidとPC間で通信が届かない．
 
@@ -536,7 +551,7 @@ netsh advfirewall firewall add rule name="G-LocON UDP IN" protocol=UDP dir=in lo
 
 ---
 
-### 9.3 iPhoneテザリングでの通信不可
+### 9.4 iPhoneテザリングでの通信不可
 
 **症状**: iPhoneのテザリングを使用すると，同一ネットワーク上のAndroid→PCへのUDP通信ができない．
 
@@ -552,7 +567,7 @@ netsh advfirewall firewall add rule name="G-LocON UDP IN" protocol=UDP dir=in lo
 
 ---
 
-### 9.4 edge_servers.csv の交差点IDが一致しない
+### 9.5 edge_servers.csv の交差点IDが一致しない
 
 **症状**: MasterServerコンソールに `EdgeServerRegistry: 未登録の交差点ID=XXXXX` が出力され，アプリのマップにマーカーが表示されない．
 
@@ -568,7 +583,7 @@ netsh advfirewall firewall add rule name="G-LocON UDP IN" protocol=UDP dir=in lo
 
 ---
 
-### 9.5 テスト時のEdgeServer切り替え方法（コメントアウト方式）
+### 9.6 テスト時のEdgeServer切り替え方法（コメントアウト方式）
 
 CSVには全交差点を記載し，起動するEdgeServerの行だけ有効にする．`#` 始まりの行はMasterServerが無視するため，アプリのマップには有効行のみマーカー表示される．
 
@@ -586,7 +601,7 @@ CSVには全交差点を記載し，起動するEdgeServerの行だけ有効に�
 
 ---
 
-### 9.6 SignalingServerへのゴーストピア残留
+### 9.7 SignalingServerへのゴーストピア残留
 
 **症状**: アプリを強制終了・再インストールした後，前回起動時のピア情報が別端末として検出され続ける．
 
@@ -596,7 +611,7 @@ CSVには全交差点を記載し，起動するEdgeServerの行だけ有効に�
 
 ---
 
-### 9.7 仮想位置モード・SIMの使い方
+### 9.8 仮想位置モード・SIMの使い方
 
 実験予定地点にいない場合でも，仮想位置を使ってSIMを動かしてV2Vロジックをデバッグできる．
 

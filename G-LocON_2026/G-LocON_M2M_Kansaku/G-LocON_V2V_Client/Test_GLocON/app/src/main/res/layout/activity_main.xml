@@ -145,7 +145,7 @@
                     android:textColor="@color/text_primary"
                     android:textSize="15sp"
                     android:textStyle="bold"
-                    android:singleLine="true"
+                    android:maxLines="2"
                     android:ellipsize="end" />
 
                 <TextView

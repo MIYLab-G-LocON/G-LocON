@@ -295,7 +295,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             end.setVisibility(View.VISIBLE);
             statusCard.setVisibility(View.VISIBLE);
             bottomPanel.setVisibility(View.VISIBLE);
-            setMode("現在地（GPS）", R.color.mode_gps);
+            setMode("サーバに接続中…（" + SERVER_IP + "）", R.color.mode_gps);
+            watchServerConnection(System.currentTimeMillis());
 
             // [変更] START後に即座にナビズーム (15) へ切り替え
             cameraLevel = 18.0f;
@@ -469,6 +470,30 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             displayMode = MapManager.DISPLAY_ALL;
         }
         mapManager.setDisplayMode(displayMode);
+    }
+
+    /**
+     * 「開始」後，STUNサーバから返事が来るまで状態カードに接続状況を出す。
+     * 位置の取得（GPS）は STUN の返事の後に始まるため，返事が無いと地図が現在地に移らない。
+     * アプリは20秒ごとに STUN へ送り直すので，PC側を直せばそのまま接続される。
+     */
+    private void watchServerConnection(long t0) {
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            if (isFinishing()) return;
+            if (appController.getP2p() != null) {
+                // 接続できた（SIM・SUMO・仮想位置を既に選んでいればその表示のまま）
+                if (statusTitle.getText().toString().startsWith("サーバに")) {
+                    setMode("現在地（GPS）", R.color.mode_gps);
+                }
+                return;
+            }
+            long sec = (System.currentTimeMillis() - t0) / 1000;
+            if (sec >= 8) {
+                setMode("サーバに接続できません（" + sec + "秒）PCのホットスポット・サーバ起動を確認",
+                        R.color.btn_end_bg);
+            }
+            watchServerConnection(t0);
+        }, 2000);
     }
 
     /** 状態カードの1行目（走行モード）と丸の色 */

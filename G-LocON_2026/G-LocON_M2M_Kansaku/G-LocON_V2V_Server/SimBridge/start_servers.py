@@ -6,7 +6,8 @@
 IntelliJ でプロジェクトをビルド済み（../out/production/ にクラスがある）であること。
 Ctrl+C で全プロセスを終了する。ログは out/servers/<サーバ名>.log に保存する。
 
-画面には各エッジサーバの JOIN / LEAVE（とエラー）を時刻付きで表示する（KEEPALIVE による JOIN(UPDATE) は出さない）。
+画面には各エッジサーバの JOIN / LEAVE（とエラー），スマホの STUN への最初の接続（Hello）を時刻付きで表示する
+（KEEPALIVE による JOIN(UPDATE)，STUN の20秒ごとの Ping は出さない）。
     python start_servers.py --show all    # 全ての出力を表示
     python start_servers.py --show none   # 画面には何も出さない（ログファイルのみ）
 """
@@ -49,6 +50,7 @@ def main():
         if a.show == "none":
             return False
         return (line.startswith("JOIN:") or line.startswith("LEAVE:")
+                or line.startswith("STUNServer;getMsg:Hello")      # スマホが「開始」を押した（STUNへの最初の接続）
                 or "エラー" in line or "Exception" in line)
 
     def pump(name, p, log):
