@@ -481,8 +481,25 @@ EdgeServerは交差点1つにつき1プロセス起動する．起動する交�
 
 ### 8.2 サーバの一括起動（IntelliJ 不要）
 
-**ダブルクリックで起動する**: `G-LocON_V2V_Server/SimBridge/` にあるバッチファイルを使えば，フォルダの移動やコマンドの入力は要らない
-（右クリック →「ショートカットの作成」でデスクトップに置くと便利）．終了はウィンドウで Ctrl+C（「バッチ ジョブを終了しますか」には Y）．
+> **おすすめ: デスクトップから起動する**
+> 毎回フォルダを開いてコマンドを打つ代わりに，デスクトップの起動ファイルをダブルクリックするだけで動かせる．
+> 初回だけ `G-LocON_V2V_Server/SimBridge/make_desktop_launchers.bat` をダブルクリックすると，デスクトップに次の起動ファイルができる
+> （リポジトリの場所を移したときも，もう一度実行する）．
+>
+> | デスクトップの起動ファイル | 内容 |
+> |---|---|
+> | `GLocON_1_servers.bat` | サーバ一式（SUMO用） |
+> | `GLocON_1_servers_fixed_route.bat` | サーバ一式（固定ルート用，評価①） |
+> | `GLocON_2_sumo_phone1_virtual.bat` | SUMO＋実機1台＋仮想車両（評価③．ふだんの確認はこれ） |
+> | `GLocON_2_sumo_phones3.bat` | SUMO＋実機3台（評価②） |
+> | `GLocON_2_sumo_pc_only.bat` | スマホなし・PCだけ |
+>
+> **使い方**: 番号の順に「1 → 2」とダブルクリックする（サーバを先に起動する）．
+> 終了は各ウィンドウで Ctrl+C（「バッチ ジョブを終了しますか」には Y）．ウィンドウは結果を読めるよう終了後も残る．
+> コマンドで起動したサーバが残っていると「起動できません: 次のポートが既に使われています」と出るので，先に止める．
+
+**ダブルクリックで起動する（フォルダから）**: `G-LocON_V2V_Server/SimBridge/` にあるバッチファイルを使えば，フォルダの移動やコマンドの入力は要らない．
+デスクトップの起動ファイルは，これらを呼び出しているだけ．
 
 | ファイル | 内容 |
 |---|---|
@@ -491,6 +508,7 @@ EdgeServerは交差点1つにつき1プロセス起動する．起動する交�
 | `run_bridge_A_phones3.bat` | 評価②: SUMO＋実機3台（sumo-gui あり） |
 | `run_bridge_B_virtual.bat` | 評価③: SUMO＋仮想クライアント＋実機1台（sumo-gui あり，実機の車を追従） |
 | `run_bridge_pc_only.bat` | スマホなし・PCだけで試す |
+| `make_desktop_launchers.bat` | 上の起動ファイルをデスクトップに作る（初回に1回） |
 
 τ・δ などを変えるときは，バッチファイルをコピーして最後の `python ...` の行に引数（`--join-eta 30` など）を足す．
 
@@ -513,6 +531,9 @@ python start_servers.py --stun --csv ..\MasterServer\edge_servers.csv   # 固定
 ---
 
 ### 8.3 検証の手順
+
+PC側の起動は，下の手順のコマンドの代わりに **8.2 のデスクトップ起動ファイル**を使ってもよい
+（評価①: `GLocON_1_servers_fixed_route`，評価②: `GLocON_1_servers` → `GLocON_2_sumo_phones3`，評価③: `GLocON_1_servers` → `GLocON_2_sumo_phone1_virtual`）．
 
 #### 初回の準備（PC・スマホ）
 
