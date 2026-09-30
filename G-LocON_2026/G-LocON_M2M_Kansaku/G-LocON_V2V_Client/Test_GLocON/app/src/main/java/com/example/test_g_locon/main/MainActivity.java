@@ -84,6 +84,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private float nowCameraAngle = 0;
     private static final String HEAD_UP  = "HEAD_UP";
     private static final String NORTH_UP = "NORTH_UP";
+    /** 地図を動かさない（自車の矢印だけが向きを変えて進む。画面外に出たら手で地図を動かす） */
+    private static final String FREE     = "FREE";
     // [変更] デフォルトを HEAD_UP → NORTH_UP に変更。
     // 起動直後は北固定の方が地図の向きが安定して見やすい。
     // ボタンを押すことで HEAD_UP（進行方向向き）に切り替えられる。
@@ -356,17 +358,24 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             // 他車両の表示: 全て → 実機のみ → なし → 全て
             displayMode = (displayMode + 1) % 3;
             mapManager.setDisplayMode(displayMode);
-            displayButton.setText(displayMode == MapManager.DISPLAY_ALL ? "表示:全"
-                    : displayMode == MapManager.DISPLAY_REAL_ONLY ? "表示:実機" : "表示:なし");
+            displayButton.setText(displayLabel());
+            showToast(displayMode == MapManager.DISPLAY_ALL ? "他の車: 実機・仮想の両方を表示"
+                    : displayMode == MapManager.DISPLAY_REAL_ONLY ? "他の車: 実機だけ表示" : "他の車: 表示しない");
 
         } else if (id == R.id.angle) {
-            // [変更] ボタンテキストを短く「H↑」「N↑」に変更（旧: "HEADUP" / "NORTHUP"）
-            if (cameraMode.equals(HEAD_UP)) {
-                cameraMode = NORTH_UP;
-                angle.setText("N↑");
-            } else {
+            // 地図の表示モードを切り替える: N↑（北が上・自車を追従）→ H↑（進行方向が上・地図が回る）
+            //                              → 固定（地図は動かず，矢印だけが向きを変えて進む）→ N↑
+            if (cameraMode.equals(NORTH_UP)) {
                 cameraMode = HEAD_UP;
                 angle.setText("H↑");
+            } else if (cameraMode.equals(HEAD_UP)) {
+                cameraMode = FREE;
+                angle.setText("固定");
+                nowCameraAngle = 0;
+                mapView.setMapOrientation(0);     // 固定モードは北を上に戻してから止める
+            } else {
+                cameraMode = NORTH_UP;
+                angle.setText("N↑");
             }
         }
     }
@@ -377,6 +386,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
     @Override
     public void onLocationUpdated(Location location, double bearing, double speed) {
+        if (cameraMode.equals(FREE)) {
+            mapManager.updateMyLocation(location.getLatitude(), location.getLongitude(), (float) bearing);
+            return;
+        }
         if (cameraMode.equals(HEAD_UP)) {
             if (Math.abs(nowCameraAngle - (float) bearing) > 5) {
                 nowCameraAngle = (float) bearing;
@@ -399,6 +412,18 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     @Override
     public void onPeripheralUsersRefreshed(ArrayList<UserInfo> allPeripheralUsers) {
         mapManager.removeStaleMarkers(allPeripheralUsers);
+        // 表示ボタンに，今のグループの車の数（実機／仮想）を出す
+        int real = 0, virt = 0;
+        for (UserInfo u : allPeripheralUsers) {
+            if (MapManager.isVirtual(u.getPeerId())) virt++; else real++;
+        }
+        final String counts = "(実" + real + "/仮" + virt + ")";
+        runOnUiThread(() -> displayButton.setText(displayLabel() + counts));
+    }
+
+    private String displayLabel() {
+        return displayMode == MapManager.DISPLAY_ALL ? "表示:全"
+                : displayMode == MapManager.DISPLAY_REAL_ONLY ? "表示:実機" : "表示:なし";
     }
 
     @Override
@@ -421,8 +446,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     @Override
     public void onSimulationLocationUpdated(double lat, double lng, double bearing) {
         runOnUiThread(() -> {
-            if (cameraMode.equals(HEAD_UP)) nowCameraAngle = (float) bearing;
-            mapManager.updateCamera(lat, lng, cameraLevel, nowCameraAngle, searchRange);
+            if (!cameraMode.equals(FREE)) {
+                nowCameraAngle = cameraMode.equals(HEAD_UP) ? (float) bearing : 0f;
+                mapManager.updateCamera(lat, lng, cameraLevel, nowCameraAngle, searchRange);
+            }
             mapManager.updateMyLocation(lat, lng, (float) bearing);
         });
     }

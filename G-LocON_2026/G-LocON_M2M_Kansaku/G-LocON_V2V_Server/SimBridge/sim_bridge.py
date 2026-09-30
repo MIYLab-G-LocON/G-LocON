@@ -197,6 +197,7 @@ class Bridge:
             self.log("PHONE_ASSIGN", ph.peer, vid, f"es_on_route={n_es}")
             self.send_route(ph)
             self.set_color(vid, "phone")
+            self.mark_phone(vid, ph)
 
     def update_phones(self, arrived):
         for vid in list(self.phone_vehicles):
@@ -252,6 +253,19 @@ class Bridge:
                 self.stats["extra"] += len(got - truth)
                 w.writerow([f"{self.now():.1f}", iid, c.peer, len(truth), len(got),
                             len(truth - got), len(got - truth)])
+
+    def mark_phone(self, vid, ph):
+        """sumo-gui で実機が乗っている車を目立たせる（紫の大きな円で囲み，ラベルに端末名を出す）."""
+        if not self.a.gui:
+            return
+        try:
+            self.t.vehicle.highlight(vid, (255, 0, 255, 255), size=25)
+            self.t.vehicle.setParameter(vid, "glocon.phone", ph.peer)
+            if self.a.follow_phone:
+                self.t.gui.trackVehicle("View #0", vid)
+                self.t.gui.setZoom("View #0", 400)
+        except Exception:
+            pass
 
     # ---------- sumo-gui の色分け ----------
     def set_color(self, vid, kind):
@@ -503,6 +517,8 @@ def main():
     ap.add_argument("--virtual-max", type=int, default=300, help="同時に動かす仮想クライアントの上限")
     ap.add_argument("--vloc-all", action="store_true", help="仮想クライアントどうしにも位置を送る（既定は実機にだけ送る）")
     ap.add_argument("--gui", action="store_true", help="sumo-gui で表示し，グループごとに色分けする")
+    ap.add_argument("--follow-phone", action="store_true",
+                    help="sumo-gui の画面を実機が乗っている車に追従させる（乗り換えても追従する）")
     ap.add_argument("--speed", type=float, default=1.0, help="実時間に対する進み方（1.0=実時間。動作確認用に大きくできる）")
     ap.add_argument("--duration", type=float, default=0, help="シミュレーション時間の上限[秒]（0=最後の車が着くまで）")
     ap.add_argument("--seed", type=int, default=1)
