@@ -16,7 +16,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * JOIN/LEAVEが必要な交差点をコールバックで通知する。
  *
  * パラメータ:
- *   参加タイミング τ  = 30.0  : ETA がこの値を下回ったらJOIN
+ *   参加タイミング τ  = 15.0  : ETA がこの値を下回ったらJOIN
  *                                （評価では 15 / 30 / 45秒を比較する。SUMOモードでは SimBridge から値を受け取る）
  *   PASS_RADIUS_M      = 20.0  : 交差点にこの距離まで近づいたら「通過済み」とする
  *   離脱円の半径 δ    = 60.0  : 通過済みで，交差点から この距離以上かつ遠ざかっていたらLEAVE
@@ -50,7 +50,7 @@ public class IntersectionManager {
     public static void setLeaveThresholdM(double m) { if (m > 0) leaveThresholdM = m; }
 
     /** 参加タイミング τ の既定値 [秒]: 交差点までのETAがこれを下回ったらJOIN */
-    public  static final double DEFAULT_JOIN_ETA_SEC = 30.0;
+    public  static final double DEFAULT_JOIN_ETA_SEC = 15.0;
     /** 評価で比べる候補（状態カードをタップして選べる） */
     public  static final double[] JOIN_ETA_CANDIDATES_SEC = {15.0, 30.0, 45.0};
     public  static final double[] LEAVE_CANDIDATES_M      = {30.0, 60.0, 100.0};

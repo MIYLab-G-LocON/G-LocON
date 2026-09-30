@@ -36,7 +36,7 @@
 2. マスタサーバに交差点IDリストを送信し，各エッジサーバのIP/Portを受信
 3. 走行中，各交差点へのETA（到達予測時刻）を常時計算
 4. **ETA < τ**（参加タイミング）になったらエッジサーバへJOIN要求を送信
-   - τ は評価項目とし **15秒 / 30秒 / 45秒** を比較する．既定値は **30秒**．
+   - τ は評価項目とし **15秒 / 30秒 / 45秒** を比較する．既定値は **15秒**．
      τ が大きいほど交差点の手前で早くグループに入り P2P 接続の準備時間が長くとれるが，グループの人数・サーバの負荷が増える
    - τ はアプリでは `IntersectionManager.DEFAULT_JOIN_ETA_SEC`，SimBridgeでは `common.JOIN_ETA_SEC`（実行時は `--join-eta`）．
      SUMOモードでは δ と同じく `SIM_ROUTE` で実機に送る．実機だけの評価では，アプリの状態カードをタップして τ・δ を候補から選べる
@@ -235,7 +235,7 @@ CARLAはSUMOとの公式連携（co-simulation）があるため，デモ用の�
 
 - 2つのモードは同じ仕組みで，SimBridge の設定（受け付ける実機の台数 `--phones`，仮想クライアントの有無 `--virtual`）だけが異なる
 - **仮想クライアント**: SUMOの車両1台ごとに専用のUDPソケットを持ち，アプリと同じ手順・同じ形式で
-  MasterServerへの問い合わせ，ETA<τ（既定30秒）でJOIN，通過後にδ（既定60m）離れて遠ざかったらLEAVE，15秒ごとのKEEPALIVE を行う．
+  MasterServerへの問い合わせ，ETA<τ（既定15秒）でJOIN，通過後にδ（既定60m）離れて遠ざかったらLEAVE，15秒ごとのKEEPALIVE を行う．
   エッジサーバからは実機と区別がつかない．グループ内の実機へは位置（SendLocation）も送るため，実機の地図に仮想車両が表示される（peerID は `sim-<車両ID>`）
 - **表示の切り替え**: アプリの「表示」ボタンで，他車両を「P2P → 全車両 → 実機のみ → なし」の順に切り替える．
   「P2P」はP2Pでつながった車（実機は赤・緑，仮想車両は半透明の灰色のピン），
@@ -490,7 +490,7 @@ python sim_bridge.py --phones 3                       # モードA: 実機3台
 python sim_bridge.py --phones 1 --virtual --gui       # モードB: 仮想クライアント＋実機1台（sumo-guiで色分け表示）
 python sim_bridge.py --phones 0 --virtual --gui --local   # 実機なし・PCだけで試す
 python sim_bridge.py --phones 1 --virtual --gui --leave-dist 100   # 離脱円 δ を変える（30 / 60 / 100，既定60）
-python sim_bridge.py --phones 1 --virtual --gui --join-eta 45      # 参加タイミング τ を変える（15 / 30 / 45秒，既定30）
+python sim_bridge.py --phones 1 --virtual --gui --join-eta 30      # 参加タイミング τ を変える（15 / 30 / 45秒，既定15）
 ```
 
 **グループのJOIN/LEAVEの確認**（IntelliJ を使わない場合）

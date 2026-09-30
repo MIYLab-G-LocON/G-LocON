@@ -23,7 +23,7 @@
 
 ■ 仮想クライアント（--virtual）
     SUMOの車1台ごとに専用のUDPソケットを持ち，アプリと同じ手順・同じ形式で
-      INTERSECTION_QUERY（MasterServer）→ ETA<τ（既定30秒）でJOIN／通過後δ（既定60m）離れて遠ざかったらLEAVE／15秒ごとKEEPALIVE
+      INTERSECTION_QUERY（MasterServer）→ ETA<τ（既定15秒）でJOIN／通過後δ（既定60m）離れて遠ざかったらLEAVE／15秒ごとKEEPALIVE
     を送る。エッジサーバから届くメンバー一覧・追加・離脱通知でグループを管理し，
     グループ内の実機へ位置（SendLocation）を1秒ごとに送る（実機の地図に仮想車両として表示される）。
     peerID は "sim-<車両ID>"。

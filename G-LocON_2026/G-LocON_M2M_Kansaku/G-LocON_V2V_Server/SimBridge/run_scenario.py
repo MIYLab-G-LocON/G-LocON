@@ -121,7 +121,7 @@ def main():
 
     common.LEAVE_DIST_M = a.leave_dist
     common.JOIN_ETA_SEC = a.join_eta
-    # τ・δ はグループを作る ideal にだけ効くので，ideal の名前にだけ付ける（例: none_s1, ideal_s1_t30_d60）
+    # τ・δ はグループを作る ideal にだけ効くので，ideal の名前にだけ付ける（例: none_s1, ideal_s1_t15_d60）
     name = a.tag or (f"{a.mode}_s{a.seed}"
                      + (f"_t{int(a.join_eta)}_d{int(a.leave_dist)}" if a.mode == "ideal" else ""))
     out = os.path.join(common.OUT_DIR, name)
