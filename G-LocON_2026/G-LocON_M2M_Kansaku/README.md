@@ -164,7 +164,7 @@ G-LocON_2026/
 | SendLocation | Client | 他車両 | P2P直接通信（位置情報送信） |
 | VEHICLE_COMMAND | Client | SimBridge | シミュレータ車両への行動指令（減速・復帰など）（未実装） |
 | SIM_HELLO / SIM_ROUTE_REQ / SIM_BYE | Client（SUMOモード） | SimBridge | 車両の割り当て要求／ルート再送要求／終了 |
-| SIM_ROUTE | SimBridge | Client（SUMOモード） | 割り当てた車両のルート上の交差点列（OSRMの結果の代わり） |
+| SIM_ROUTE | SimBridge | Client（SUMOモード） | 割り当てた車両のルート上の交差点列と道の形（OSRMの結果の代わり），参加タイミング τ・離脱円 δ |
 | SIM_LOCATION | SimBridge | Client（SUMOモード） | 割り当てた車両の位置・速度・進行方向（1秒ごと，GPSの代わり） |
 | SIM_END | SimBridge | Client（SUMOモード） | 車両が目的地に到着（次の車両を割り当てる） |
 | SIM_VEHICLES | SimBridge | Client（SUMOモード） | 自車の周り（既定400m）の全車両の位置・向き（1秒ごと，「表示:全車両」用） |
@@ -514,7 +514,7 @@ python start_servers.py --stun --csv ..\MasterServer\edge_servers.csv   # 固定
 | 場所 | 内容 |
 |---|---|
 | 上（開始前） | Peer ID の入力と「開始」．**端末ごとに別の Peer ID**（phone1 など）にする |
-| 上（開始後） | 状態カード: 1行目=走行モード（GPS / 仮想走行 / SUMO車両），2行目=参加中のグループ数・P2Pでつながっている車（実機/仮想），3行目=参加タイミング τ・離脱円 δ．**タップで τ・δ を候補から選ぶ**（SUMOモードでは sim_bridge.py の値） |
+| 上（開始後） | 状態カード: 1行目=走行モード（GPS / 仮想走行 / SUMO車両），2行目=参加中のグループ数・P2Pでつながっている車（実機/仮想），3行目=参加タイミング τ・離脱円 δ．**カードをタップ（右端の設定アイコン）で τ・δ を候補から選ぶ**（SUMOモードでは sim_bridge.py の値） |
 | 右 | コンパス（N↑ 北が上 → H↑ 進行方向が上 → 固定 地図を動かさない）とズーム |
 | 下 | 他の車の表示（P2P / 全車両 / 実機 / なし）と，SUMO・SIM・仮想位置・目的地・終了 |
 | 地図 | 六角形 = エッジサーバ交差点（JOIN中は緑），円 = 離脱円（半径 δ），ピン = P2Pでつながった車（実機は赤・緑，仮想は灰色），小さい矢印 = つながっていない車（全車両表示のとき） |

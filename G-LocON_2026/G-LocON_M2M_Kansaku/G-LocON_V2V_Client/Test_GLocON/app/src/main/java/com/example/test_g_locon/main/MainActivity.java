@@ -573,8 +573,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     }
 
     @Override
-    public void onRouteLoaded(List<Intersection> intersections) {
-        mapManager.drawRoute(intersections);
+    public void onRouteLoaded(List<Intersection> intersections, List<double[]> shape) {
+        mapManager.drawRoute(intersections, shape);
         joinedIds.clear();
         updateStatus();
         if (!appController.isSumoMode()) showToast("ルート取得完了: 交差点数=" + intersections.size());

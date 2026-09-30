@@ -384,8 +384,10 @@ public class MapManager {
      * onRouteLoaded() から呼ばれる。既存のルート・交差点マーカーは削除して再描画する。
      *
      * @param intersections ルート上の交差点リスト（ルート順）
+     * @param shape         道の形 [緯度, 経度] の列。null なら交差点どうしを直線で結ぶ
+     *                      （交差点だけを結ぶと，曲がった道で線が道の無い所を横切っていた）
      */
-    public void drawRoute(List<Intersection> intersections) {
+    public void drawRoute(List<Intersection> intersections, List<double[]> shape) {
         uiHandler.post(() -> {
             // 既存ルートラインを削除
             if (routePolyline != null) {
@@ -404,8 +406,12 @@ public class MapManager {
 
             // ルートライン描画
             List<GeoPoint> points = new ArrayList<>();
-            for (Intersection i : intersections) {
-                points.add(new GeoPoint(i.getLat(), i.getLng()));
+            if (shape != null && shape.size() >= 2) {
+                for (double[] p : shape) points.add(new GeoPoint(p[0], p[1]));
+            } else {
+                for (Intersection i : intersections) {
+                    points.add(new GeoPoint(i.getLat(), i.getLng()));
+                }
             }
             routePolyline = new Polyline();
             routePolyline.setPoints(points);

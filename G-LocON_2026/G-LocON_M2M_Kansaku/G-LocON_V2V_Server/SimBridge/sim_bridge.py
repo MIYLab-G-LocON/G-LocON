@@ -14,7 +14,8 @@
     スマホ → ブリッジ  SIM_HELLO      {peerID}            車の割り当てを要求（割り当てまで2秒ごと）
                        SIM_ROUTE_REQ  {peerID}            ルートを再送してほしい
                        SIM_BYE        {peerID}            終了
-    ブリッジ → スマホ  SIM_ROUTE      {vehicleId, intersections:[{intersectionId,lat,lon}], destLat, destLon}
+    ブリッジ → スマホ  SIM_ROUTE      {vehicleId, intersections:[{intersectionId,lat,lon}], shape:[[lat,lon],...], destLat, destLon,
+                                       leaveDist, joinEta}（shape は道の形。地図のルート線用）
                        SIM_LOCATION   {vehicleId, latitude, longitude, speed[m/s], bearing, simTime}（1秒ごと）
                        SIM_END        {vehicleId}         車が目的地に着いた（次の車が割り当てられる）
                        SIM_VEHICLES   {vehicles:[[peerID, lat, lon, bearing, 実機なら1], ...]}（1秒ごと）
@@ -180,6 +181,19 @@ class Bridge:
         except OSError:
             pass
 
+    def route_shape(self, vid):
+        """今いる道路から目的地までの道の形 [[緯度, 経度], ...]（アプリの地図のルート線用）."""
+        route = self.t.vehicle.getRoute(vid)
+        idx = max(self.t.vehicle.getRouteIndex(vid), 0)
+        pts = []
+        for e in route[idx:]:
+            for x, y in self.net.getEdge(e).getShape():
+                lon, lat = self.net.convertXY2LonLat(x, y)
+                p = [round(lat, 6), round(lon, 6)]
+                if not pts or pts[-1] != p:
+                    pts.append(p)
+        return pts
+
     def send_route(self, ph):
         seq = self.route_intersections(ph.vid)
         dest_edge = self.t.vehicle.getRoute(ph.vid)[-1]
@@ -188,6 +202,7 @@ class Bridge:
         self.send_phone(ph, {"processType": "SIM_ROUTE", "vehicleId": ph.vid, "leaveDist": common.LEAVE_DIST_M,
                              "joinEta": common.JOIN_ETA_SEC,
                              "intersections": [{"intersectionId": i, "lat": la, "lon": lo} for i, la, lo in seq],
+                             "shape": self.route_shape(ph.vid),
                              "destLat": dlat, "destLon": dlon})
 
     def assign_phones(self, departed):

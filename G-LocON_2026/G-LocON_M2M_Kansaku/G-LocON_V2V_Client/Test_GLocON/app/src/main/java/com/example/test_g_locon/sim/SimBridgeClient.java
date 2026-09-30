@@ -62,6 +62,11 @@ public class SimBridgeClient implements Runnable {
 
     public String getVehicleId() { return vehicleId; }
 
+    /** 直前の SIM_ROUTE で届いた道の形 [緯度, 経度] の列（無ければ null） */
+    private volatile List<double[]> lastRouteShape = null;
+
+    public List<double[]> getLastRouteShape() { return lastRouteShape; }
+
     /** 終了する（SimBridge に SIM_BYE を送ってからソケットを閉じる） */
     public void stop() {
         running = false;
@@ -133,6 +138,17 @@ public class SimBridgeClient implements Runnable {
                 // 離脱円の半径は SimBridge の設定に合わせる（仮想クライアントと同じ条件で比較するため）
                 if (m.has("leaveDist")) IntersectionManager.setLeaveThresholdM(m.getDouble("leaveDist"));
                 if (m.has("joinEta")) IntersectionManager.setJoinEtaSec(m.getDouble("joinEta"));
+                // 道の形（地図のルート線用）: [[緯度, 経度], ...]
+                lastRouteShape = null;
+                if (m.has("shape")) {
+                    JSONArray sh = m.getJSONArray("shape");
+                    List<double[]> shape = new ArrayList<>(sh.length());
+                    for (int i = 0; i < sh.length(); i++) {
+                        JSONArray ll = sh.getJSONArray(i);
+                        shape.add(new double[]{ll.getDouble(0), ll.getDouble(1)});
+                    }
+                    lastRouteShape = shape;
+                }
                 JSONArray arr = m.getJSONArray("intersections");
                 List<Intersection> list = new ArrayList<>();
                 for (int i = 0; i < arr.length(); i++) {

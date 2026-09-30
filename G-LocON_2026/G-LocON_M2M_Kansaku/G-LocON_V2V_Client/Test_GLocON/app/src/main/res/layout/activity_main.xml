@@ -160,6 +160,15 @@
                     android:maxLines="2"
                     android:ellipsize="end" />
             </LinearLayout>
+
+            <!-- 設定アイコン: 状態カードのどこをタップしても τ・δ を選ぶ画面が開く -->
+            <ImageView
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:layout_marginStart="8dp"
+                android:contentDescription="参加タイミング・離脱円の設定"
+                android:src="@drawable/ic_tune"
+                app:tint="@color/action_tint" />
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 

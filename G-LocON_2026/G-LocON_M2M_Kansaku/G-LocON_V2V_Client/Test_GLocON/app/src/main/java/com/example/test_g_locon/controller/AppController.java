@@ -140,6 +140,8 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
 
     private final IntersectionManager intersectionManager;
     private final OsrmRouteClient osrmRouteClient = new OsrmRouteClient();
+    /** 今のルートの道の形 [緯度, 経度]（OSRM または SimBridge から。地図のルート線・SIMの走行経路に使う） */
+    private volatile List<double[]> routeShape = null;
     private EdgeServerClient edgeServerClient;
     // ルート取得・MasterServer問い合わせ用の単一スレッド
     private final ExecutorService routeExecutor = Executors.newSingleThreadExecutor();
@@ -515,6 +517,7 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
                 System.err.println("setDestination: ルート取得失敗");
                 return;
             }
+            routeShape = osrmRouteClient.getLastShape();
 
             loadRoute(intersections);
         });
@@ -529,7 +532,7 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
         intersectionManager.setIntersections(intersections);
 
         // ③ UIへルート表示を通知
-        callback.onRouteLoaded(intersections);
+        callback.onRouteLoaded(intersections, routeShape);
 
         // ④ MasterServerへ交差点IDリストを問い合わせ，エッジサーバAddrを取得
         MasterServerClient masterClient = new MasterServerClient(
@@ -542,7 +545,7 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
                     System.out.println("loadRoute: エッジサーバAddr確定 "
                             + updatedIntersections.size() + "件");
                     // 交差点マーカーを再描画（EdgeServer有無が確定した後）
-                    callback.onRouteLoaded(updatedIntersections);
+                    callback.onRouteLoaded(updatedIntersections, routeShape);
                 }
         );
         masterClient.run(); // routeExecutorのスレッド内で同期実行
@@ -591,8 +594,10 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
                 new SimBridgeClient.Listener() {
                     @Override
                     public void onSimRoute(String vehicleId, List<Intersection> intersections) {
+                        final List<double[]> shape = simBridge.getLastRouteShape();
                         routeExecutor.submit(() -> {
                             leaveAllIntersections();
+                            routeShape = shape;
                             loadRoute(intersections);
                         });
                         callback.onSumoStatus("SUMO車両 " + vehicleId + " に乗車（交差点 " + intersections.size() + "）");
@@ -638,29 +643,28 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
     // =========================================================
 
     /**
-     * 交差点リストを10mごとに線形補間した座標列を生成する。
+     * ルートの点の列（道の形，無ければ交差点）を10mごとに補間した座標列を生成する。
      * 1秒ごとに10m進む（= SIM_SPEED_MPS）ため，ETAが自然に変化しJOIN閾値を正しく通過する。
      */
-    private List<double[]> buildSimPath(List<Intersection> intersections) {
+    private List<double[]> buildSimPath(List<double[]> points) {
+        // 点の列 [緯度, 経度] を，1秒に SIM_SPEED_MPS 進むよう等間隔に並べ直す（曲がり角の点も通る）
         HubenyDistance hubeny = new HubenyDistance();
         List<double[]> path = new ArrayList<>();
-        for (int i = 0; i < intersections.size() - 1; i++) {
-            Intersection from = intersections.get(i);
-            Intersection to   = intersections.get(i + 1);
-            double dist  = hubeny.calcDistance(from.getLat(), from.getLng(),
-                                               to.getLat(), to.getLng());
-            int steps = Math.max(1, (int) Math.ceil(dist / SIM_SPEED_MPS));
-            for (int s = 0; s < steps; s++) {
-                double t = (double) s / steps;
-                path.add(new double[]{
-                    from.getLat() + t * (to.getLat() - from.getLat()),
-                    from.getLng() + t * (to.getLng() - from.getLng())
-                });
+        double carry = 0;   // 前の区間で余った距離
+        for (int i = 0; i < points.size() - 1; i++) {
+            double[] from = points.get(i), to = points.get(i + 1);
+            double dist = hubeny.calcDistance(from[0], from[1], to[0], to[1]);
+            if (dist <= 0) continue;
+            double d = carry;
+            while (d < dist) {
+                double t = d / dist;
+                path.add(new double[]{from[0] + t * (to[0] - from[0]), from[1] + t * (to[1] - from[1])});
+                d += SIM_SPEED_MPS;
             }
+            carry = d - dist;
         }
         // 終点を追加
-        Intersection last = intersections.get(intersections.size() - 1);
-        path.add(new double[]{ last.getLat(), last.getLng() });
+        path.add(points.get(points.size() - 1).clone());
         return path;
     }
 
@@ -679,7 +683,14 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
         // 仮想位置モード中に GPS が引き起こした誤JOIN/LEAVEをリセットし
         // SIM開始から正しい JOIN/LEAVE シーケンスを開始できるようにする。
         intersectionManager.resetAllJoinState();
-        simPath  = buildSimPath(list);
+        // 道の形があればそれに沿って走る（無ければ交差点どうしを直線で結ぶ）
+        List<double[]> pts = new ArrayList<>();
+        if (routeShape != null && routeShape.size() >= 2) {
+            pts.addAll(routeShape);
+        } else {
+            for (Intersection i : list) pts.add(new double[]{i.getLat(), i.getLng()});
+        }
+        simPath  = buildSimPath(pts);
         simIndex = 0;
         simScheduler = Executors.newSingleThreadScheduledExecutor();
         simScheduler.scheduleAtFixedRate(() -> {

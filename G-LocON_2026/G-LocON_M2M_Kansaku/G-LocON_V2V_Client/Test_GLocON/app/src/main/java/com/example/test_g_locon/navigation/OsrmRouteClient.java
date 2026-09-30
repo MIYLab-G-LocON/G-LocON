@@ -38,11 +38,12 @@ public class OsrmRouteClient {
     public List<Intersection> fetchIntersections(double fromLat, double fromLng,
                                                   double toLat,  double toLng) {
         List<Intersection> intersections = new ArrayList<>();
+        lastShape = null;
         try {
             String urlStr = OSRM_BASE
                     + fromLng + "," + fromLat + ";"
                     + toLng   + "," + toLat
-                    + "?steps=true&geometries=geojson&overview=false";
+                    + "?steps=true&geometries=geojson&overview=full";   // full: 道の形（地図のルート線用）
 
             URL url = new URL(urlStr);
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
@@ -74,6 +75,16 @@ public class OsrmRouteClient {
             reader.close();
 
             JSONObject response = new JSONObject(sb.toString());
+            // 道の形（[経度, 緯度] の列）。地図のルート線と SIM の走行経路に使う
+            List<double[]> shape = new ArrayList<>();
+            JSONArray coords = response.getJSONArray("routes").getJSONObject(0)
+                    .getJSONObject("geometry").getJSONArray("coordinates");
+            for (int i = 0; i < coords.length(); i++) {
+                JSONArray c = coords.getJSONArray(i);
+                shape.add(new double[]{c.getDouble(1), c.getDouble(0)});
+            }
+            lastShape = shape;
+
             JSONArray steps = response
                     .getJSONArray("routes").getJSONObject(0)
                     .getJSONArray("legs").getJSONObject(0)
@@ -105,6 +116,11 @@ public class OsrmRouteClient {
         }
         return intersections;
     }
+
+    /** 直前に取得したルートの道の形 [緯度, 経度] の列（取得できなければ null） */
+    private volatile List<double[]> lastShape = null;
+
+    public List<double[]> getLastShape() { return lastShape; }
 
     /** 交差点リストから intersectionId のリストだけを抽出する（MasterServer問い合わせ用） */
     public List<String> toIdList(List<Intersection> intersections) {

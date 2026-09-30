@@ -50,8 +50,9 @@ public interface IAppController {
      * MapManagerでルートラインと交差点マーカーを描画するために使用する。
      *
      * @param intersections ルート上の交差点リスト（ルート順）
+     * @param shape         道の形 [緯度, 経度] の列（ルート線用。無ければ null → 交差点を結ぶ）
      */
-    void onRouteLoaded(List<Intersection> intersections);
+    void onRouteLoaded(List<Intersection> intersections, List<double[]> shape);
 
     /**
      * 交差点V2VグループへのJOIN完了（EdgeServerへのJOIN送信完了）時に呼ばれる。
