@@ -111,10 +111,13 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
      * ばらばらになる（矢印が回る）。GPSが測った速度がこれ以上のとき（動いているとき）だけ向きを更新する
      */
     private static final float BEARING_MIN_SPEED_MPS = 1.5f;   // 約5 km/h
-    /** GPSの速度が無い（ネットワーク測位など）ときは，この距離以上かつ位置の誤差以上動いたときだけ向きを更新する */
-    private static final double BEARING_MIN_MOVE_M = 5.0;
+    /** この回数続けて「動いている」GPSの位置が来たら向きを更新する（1回だけの揺れでは変えない） */
+    private static final int BEARING_MIN_MOVING_FIXES = 2;
+    /** GPSが向きの誤差を出しているとき，これより大きければ使わない [度] */
+    private static final float BEARING_MAX_ERROR_DEG = 45f;
     /** 最後に決まった進行方向（止まっている間はこれを使う） */
     private double lastBearing = 0;
+    private int movingFixes = 0;
     private final Deque<Double> speedHistory = new ArrayDeque<>();
 
     // [追加] GPS非依存の定期 signalingSearch 用スケジューラ
@@ -294,34 +297,27 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
         // searchScheduler が5秒ごとに SEARCH を送り続けるため P2P 接続は維持される。
         if (useVirtualPosition) return;
 
-        double moved = new HubenyDistance().calcDistance(
-                currentLocation.getLatitude(), currentLocation.getLongitude(),
-                geo.getLatitude(), geo.getLongitude()
-        );
-
-        // 進行方向（北を0度とする方位角）。止まっているときのGPSの揺れで向きが回らないよう，動いているときだけ更新する
-        //   1. GPSが速度と向きを測っていれば，速度が BEARING_MIN_SPEED_MPS 以上のときだけその向きを使う
-        //   2. 無ければ，BEARING_MIN_MOVE_M 以上かつ位置の誤差以上動いたときだけ前回からの向きを使う
-        //   3. それ以外（止まっている・初回）は前回の向きのまま
-        double bearing = lastBearing;
-        if (totalGeoUpdateCount > 0) {
-            if (geo.hasSpeed()) {
-                if (geo.getSpeed() >= BEARING_MIN_SPEED_MPS) {
-                    bearing = geo.hasBearing() ? geo.getBearing()
-                            : new HeadUp(currentLocation.getLatitude(), currentLocation.getLongitude(),
-                                         geo.getLatitude(), geo.getLongitude()).getNowAngle();
-                }
-            } else if (moved >= Math.max(BEARING_MIN_MOVE_M, geo.hasAccuracy() ? geo.getAccuracy() : 0)) {
-                bearing = new HeadUp(currentLocation.getLatitude(), currentLocation.getLongitude(),
-                                     geo.getLatitude(), geo.getLongitude()).getNowAngle();
-            }
+        // 進行方向（北を0度とする方位角）。止まっているときに向きが変わらないよう，確かに動いているときだけ更新する
+        //   - GPS が測った速度・向きがあり，速度が BEARING_MIN_SPEED_MPS 以上の位置が
+        //     BEARING_MIN_MOVING_FIXES 回続いたときだけ，GPS の向きを使う（向きの誤差が大きいものは使わない）
+        //   - 速度の無い位置（Wi-Fi・基地局による測位）では向きを変えない。屋内では GPS と Wi-Fi 測位の位置が
+        //     数十m離れて交互に届き，その差から求めた向きがでたらめになっていた
+        //   - それ以外（止まっている・初回）は前回の向きのまま
+        boolean moving = totalGeoUpdateCount > 0 && geo.hasSpeed() && geo.getSpeed() >= BEARING_MIN_SPEED_MPS
+                && geo.hasBearing()
+                && !(geo.hasBearingAccuracy() && geo.getBearingAccuracyDegrees() > BEARING_MAX_ERROR_DEG);
+        movingFixes = moving ? movingFixes + 1 : 0;
+        if (movingFixes >= BEARING_MIN_MOVING_FIXES) {
+            lastBearing = geo.getBearing();
         }
-        lastBearing = bearing;
+        double bearing = lastBearing;
 
         // 速度 (km/h)。GPSが測った速度（ドップラー。止まっていればほぼ0）があればそれを使う。
         // 無ければ2点間距離から求める（GPS更新間隔を1秒と仮定して m/s→km/h に換算）。
         // 2点間距離だけだと，止まっていてもGPSの揺れで 10〜30 km/h に見え，ETA（JOIN）が狂っていた
-        double rawSpeed = geo.hasSpeed() ? geo.getSpeed() * 3.6 : moved * 3.6;
+        // 速度の無い位置（Wi-Fi・基地局測位）は，屋内で位置が大きく飛ぶため速度にも使わず，直前の速度のままにする
+        double rawSpeed = geo.hasSpeed() ? geo.getSpeed() * 3.6
+                : (speedHistory.isEmpty() ? 0 : speedHistory.peekLast());
 
         // [追加] 移動平均で GPS ブレによる速度スパイクを除去する。
         // 直近 SPEED_SMOOTH_SAMPLES 回分の瞬時速度を保持し、その平均を使用する。
