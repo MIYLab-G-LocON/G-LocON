@@ -38,6 +38,10 @@
 4. **ETA < τ**（閾値，例: 30秒）になったらエッジサーバへJOIN要求を送信
 5. JOIN承認後，グループ内の他車両とG-LocONのNATホールパンチングでP2P通信を確立
 6. 交差点を**通過済み**（交差点から p=20m 以内に近づいた）で，交差点中心からの距離 **d ≥ δ かつ Δd > 0**（離れている）になったらLEAVE通知を送信
+   - δ（離脱円の半径）は評価項目とし **30m / 60m / 100m** を比較する．既定値は **60m**．
+     δ が大きいほど交差点を出た後もグループに長く残り（P2P接続時間が長い），小さいほどグループの人数が少なくサーバ・通信の負荷が小さい
+   - δ はアプリでは `IntersectionManager.DEFAULT_LEAVE_THRESHOLD_M`，SimBridgeでは `common.LEAVE_DIST_M`（実行時は `--leave-dist`）．
+     SUMOモードでは SimBridge が `SIM_ROUTE` で δ を実機に送り，実機と仮想クライアントを同じ δ にそろえる．アプリの地図にはこの半径で離脱円を描く
    - 「通過済み」の条件が無いと，道が曲がって直線距離が一時的に増えたときに交差点の手前でLEAVEしてしまい，
      一度LEAVEした交差点には再JOINしないため，グループ外のまま交差点を通過していた（SUMOでの試験で，エッジサーバ交差点を通過した車の約3割）
    - p=20m は，SUMOで全車両の位置を1秒ごと（アプリと同じ間隔）に記録し，交差点に最も近づいた距離を集計して決めた
@@ -225,7 +229,7 @@ CARLAはSUMOとの公式連携（co-simulation）があるため，デモ用の�
 
 - 2つのモードは同じ仕組みで，SimBridge の設定（受け付ける実機の台数 `--phones`，仮想クライアントの有無 `--virtual`）だけが異なる
 - **仮想クライアント**: SUMOの車両1台ごとに専用のUDPソケットを持ち，アプリと同じ手順・同じ形式で
-  MasterServerへの問い合わせ，ETA<30秒でJOIN，30m離れて遠ざかったらLEAVE，15秒ごとのKEEPALIVE を行う．
+  MasterServerへの問い合わせ，ETA<30秒でJOIN，通過後にδ（既定60m）離れて遠ざかったらLEAVE，15秒ごとのKEEPALIVE を行う．
   エッジサーバからは実機と区別がつかない．グループ内の実機へは位置（SendLocation）も送るため，実機の地図に仮想車両が表示される（peerID は `sim-<車両ID>`）
 - **表示の切り替え**: アプリの「表示」ボタンで，他車両を「全て／実機のみ／なし」に切り替える．実機は赤・緑，仮想車両は半透明の灰色のピン
 - **PC画面での確認**: `sim_bridge.py --gui` で sumo-gui を表示し，車両をグループ（交差点）ごとに色分けする（実機が乗っている車は紫，未参加は灰色）
@@ -475,7 +479,15 @@ python start_servers.py --stun                        # STUN・MasterServer・�
 python sim_bridge.py --phones 3                       # モードA: 実機3台
 python sim_bridge.py --phones 1 --virtual --gui       # モードB: 仮想クライアント＋実機1台（sumo-guiで色分け表示）
 python sim_bridge.py --phones 0 --virtual --gui --local   # 実機なし・PCだけで試す
+python sim_bridge.py --phones 1 --virtual --gui --leave-dist 100   # 離脱円 δ を変える（30 / 60 / 100，既定60）
 ```
+
+**グループのJOIN/LEAVEの確認**（IntelliJ を使わない場合）
+
+- `start_servers.py` のウィンドウに，各エッジサーバの JOIN / LEAVE が時刻・ポート付きで流れる（`--show all` で全出力，`--show none` で非表示）
+- 全出力はサーバごとに `SimBridge/out/servers/EdgeServer_<ポート>.log`，`MasterServer.log` に時刻付きで保存される．
+  1つのサーバだけ追う場合は PowerShell で `Get-Content out\servers\EdgeServer_55600.log -Wait -Tail 20`
+- SimBridge 側の記録は `SimBridge/out/live_<日時>_d<δ>/`（`events.csv` に JOIN/LEAVE，`summary.txt` に集計）
 
 スマホではアプリの「開始」→「SUMO」を押す．「表示」ボタンで他車両を「全て／実機のみ／なし」に切り替える．
 

@@ -35,6 +35,7 @@ def parse():
     ap.add_argument("--gui", action="store_true")
     ap.add_argument("--no-fcd", action="store_true", help="fcd.xmlを出力しない（高速化）")
     ap.add_argument("--tag", default="")
+    ap.add_argument("--leave-dist", type=float, default=common.LEAVE_DIST_M, help="離脱円の半径 δ [m]")
     return ap.parse_args()
 
 
@@ -117,7 +118,9 @@ def main():
     common.sumo_home()
     import traci
 
-    name = a.tag or f"{a.mode}_s{a.seed}"
+    common.LEAVE_DIST_M = a.leave_dist
+    # δ はグループを作る ideal にだけ効くので，ideal の名前にだけ付ける（例: none_s1, ideal_s1_d60）
+    name = a.tag or (f"{a.mode}_s{a.seed}" + (f"_d{int(a.leave_dist)}" if a.mode == "ideal" else ""))
     out = os.path.join(common.OUT_DIR, name)
     os.makedirs(out, exist_ok=True)
     cfg = os.path.join(common.SCENARIO_DIR, "scenario.sumocfg")

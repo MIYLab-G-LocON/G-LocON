@@ -1,7 +1,7 @@
 """実行結果の集計（サービス指標）.
 
     python summarize.py                 # out/ 以下の全実行を比較
-    python summarize.py none_s1 ideal_s1
+    python summarize.py none_s1 ideal_s1_d30 ideal_s1_d60 ideal_s1_d100
 
 指標:
     near_miss      TTC < 3秒 となった危険な接近の件数（SSM）
@@ -135,7 +135,7 @@ def summarize(name):
 
 def main():
     names = sys.argv[1:] or sorted(n for n in os.listdir(common.OUT_DIR)
-                                   if os.path.isdir(os.path.join(common.OUT_DIR, n)))
+                                   if os.path.isfile(os.path.join(common.OUT_DIR, n, "tripinfo.xml")))
     rows = [summarize(n) for n in names]
     keys = list(rows[0].keys())
     out = os.path.join(common.OUT_DIR, "summary.csv")

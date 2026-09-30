@@ -84,7 +84,7 @@ public class MapManager {
     private Polyline routePolyline = null;
     /** 交差点マーカー: intersectionId → Marker */
     private final Map<String, Marker> intersectionMarkers = new HashMap<>();
-    /** エッジサーバ交差点の離脱円（半径 = IntersectionManager.LEAVE_THRESHOLD_M）: intersectionId → Polygon */
+    /** エッジサーバ交差点の離脱円（半径 = IntersectionManager.getLeaveThresholdM()）: intersectionId → Polygon */
     private final Map<String, Polygon> leaveCircles = new HashMap<>();
     /** 交差点マーカー色: JOIN前=グレー, JOIN中=緑 */
     private static final int COLOR_INTERSECTION_DEFAULT = Color.rgb(150, 150, 150); // グレー
@@ -375,7 +375,7 @@ public class MapManager {
                 if (i.hasEdgeServer()) {
                     Polygon c = new Polygon();
                     c.setPoints(Polygon.pointsAsCircle(new GeoPoint(i.getLat(), i.getLng()),
-                            IntersectionManager.LEAVE_THRESHOLD_M));
+                            IntersectionManager.getLeaveThresholdM()));
                     styleLeaveCircle(c, i.isJoined());
                     c.setInfoWindow(null);
                     mapView.getOverlays().add(c);

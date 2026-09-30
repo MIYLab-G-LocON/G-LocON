@@ -18,7 +18,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * パラメータ:
  *   ETA_THRESHOLD_SEC  = 30.0  : ETA がこの値以下になったらJOIN
  *   PASS_RADIUS_M      = 20.0  : 交差点にこの距離まで近づいたら「通過済み」とする
- *   LEAVE_THRESHOLD_M  = 30.0  : 通過済みで，交差点から この距離以上かつ遠ざかっていたらLEAVE
+ *   離脱円の半径 δ    = 60.0  : 通過済みで，交差点から この距離以上かつ遠ざかっていたらLEAVE
+ *                                （評価では 30 / 60 / 100m を比較する。SUMOモードでは SimBridge から値を受け取る）
  *
  * 通過済みの判定（PASS_RADIUS_M）は，SUMOで全車両の位置を1秒ごと（アプリと同じ間隔）に記録し，
  * 交差点に最も近づいた距離を集計して決めた（エッジサーバ交差点196回の通過で 99% が 10.5m 以内，最大 11.0m，
@@ -36,11 +37,17 @@ public class IntersectionManager {
     }
 
     private static final double ETA_THRESHOLD_SEC = 30.0;
-    /** 地図に描く離脱円の半径にも使う（MapManager） */
-    public  static final double LEAVE_THRESHOLD_M = 30.0;
     public  static final double PASS_RADIUS_M     = 20.0;
     private static final int    PASS_LOOKAHEAD    = 3;
     private static final double MIN_SPEED_MPS     = 1.0; // ETA計算の最低速度（停止中の除算エラー防止）
+
+    /** 離脱円の半径 δ の既定値 [m] */
+    public  static final double DEFAULT_LEAVE_THRESHOLD_M = 60.0;
+    /** 離脱円の半径 δ [m]。地図の離脱円（MapManager）にも使う。SUMOモードでは SimBridge の設定値に合わせる */
+    private static volatile double leaveThresholdM = DEFAULT_LEAVE_THRESHOLD_M;
+
+    public static double getLeaveThresholdM() { return leaveThresholdM; }
+    public static void setLeaveThresholdM(double m) { if (m > 0) leaveThresholdM = m; }
 
     private final List<Intersection> intersections = new CopyOnWriteArrayList<>();
     private final HubenyDistance hubeny = new HubenyDistance();
@@ -128,7 +135,7 @@ public class IntersectionManager {
                 }
             } else if (intersection.isJoined()) {
                 // LEAVE判定: d ≥ δ かつ 距離が増加
-                if (intersection.shouldLeave(LEAVE_THRESHOLD_M)) {
+                if (intersection.shouldLeave(leaveThresholdM)) {
                     intersection.setJoined(false);
                     intersection.setHasJoinedAndLeft(true); // 同一交差点への再JOINを防ぐ
                     logJoin(intersection, now, "LEAVE");

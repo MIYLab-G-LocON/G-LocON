@@ -20,7 +20,7 @@
 
 ■ 仮想クライアント（--virtual）
     SUMOの車1台ごとに専用のUDPソケットを持ち，アプリと同じ手順・同じ形式で
-      INTERSECTION_QUERY（MasterServer）→ ETA<30秒でJOIN／30m離れて遠ざかったらLEAVE／15秒ごとKEEPALIVE
+      INTERSECTION_QUERY（MasterServer）→ ETA<30秒でJOIN／通過後δ（既定60m）離れて遠ざかったらLEAVE／15秒ごとKEEPALIVE
     を送る。エッジサーバから届くメンバー一覧・追加・離脱通知でグループを管理し，
     グループ内の実機へ位置（SendLocation）を1秒ごとに送る（実機の地図に仮想車両として表示される）。
     peerID は "sim-<車両ID>"。
@@ -173,7 +173,7 @@ class Bridge:
         dest_edge = self.t.vehicle.getRoute(ph.vid)[-1]
         x, y = self.net.getEdge(dest_edge).getToNode().getCoord()
         dlon, dlat = self.net.convertXY2LonLat(x, y)
-        self.send_phone(ph, {"processType": "SIM_ROUTE", "vehicleId": ph.vid,
+        self.send_phone(ph, {"processType": "SIM_ROUTE", "vehicleId": ph.vid, "leaveDist": common.LEAVE_DIST_M,
                              "intersections": [{"intersectionId": i, "lat": la, "lon": lo} for i, la, lo in seq],
                              "destLat": dlat, "destLon": dlon})
 
@@ -517,6 +517,8 @@ def main():
     ap.add_argument("--virtual-max", type=int, default=300, help="同時に動かす仮想クライアントの上限")
     ap.add_argument("--vloc-all", action="store_true", help="仮想クライアントどうしにも位置を送る（既定は実機にだけ送る）")
     ap.add_argument("--gui", action="store_true", help="sumo-gui で表示し，グループごとに色分けする")
+    ap.add_argument("--leave-dist", type=float, default=common.LEAVE_DIST_M,
+                    help="離脱円の半径 δ [m]（実機にも同じ値を送る）。評価では 30 / 60 / 100")
     ap.add_argument("--follow-phone", action="store_true",
                     help="sumo-gui の画面を実機が乗っている車に追従させる（乗り換えても追従する）")
     ap.add_argument("--speed", type=float, default=1.0, help="実時間に対する進み方（1.0=実時間。動作確認用に大きくできる）")
@@ -536,7 +538,8 @@ def main():
     if a.local:
         a.master, a.advertise_ip, a.override_es_ip = "127.0.0.1:55556", "127.0.0.1", "127.0.0.1"
     a.master_host, a.master_port = a.master.split(":")[0], int(a.master.split(":")[1])
-    a.out = os.path.join(common.OUT_DIR, time.strftime("live_%Y%m%d_%H%M%S"))
+    common.LEAVE_DIST_M = a.leave_dist
+    a.out = os.path.join(common.OUT_DIR, time.strftime("live_%Y%m%d_%H%M%S") + f"_d{int(a.leave_dist)}")
     os.makedirs(a.out, exist_ok=True)
 
     common.sumo_home()
@@ -564,13 +567,17 @@ def main():
             circle = [(x + 15 * math.cos(2 * math.pi * i / 24), y + 15 * math.sin(2 * math.pi * i / 24))
                       for i in range(24)]
             traci.polygon.add(f"ES{k}_area", circle, col, fill=True, polygonType="edgeServer", layer=5)
+            # 離脱円（半径 δ）の輪郭
+            ring = [(x + common.LEAVE_DIST_M * math.cos(2 * math.pi * i / 48),
+                     y + common.LEAVE_DIST_M * math.sin(2 * math.pi * i / 48)) for i in range(48)]
+            traci.polygon.add(f"ES{k}_leave", ring, col, fill=False, polygonType="leaveCircle", layer=4, lineWidth=1.5)
             traci.poi.add(f"ES{k}", x, y, col, poiType="edgeServer", layer=6, width=6, height=6)
     ef = open(os.path.join(a.out, "events.csv"), "w", newline="", encoding="utf-8")
     ew = csv.writer(ef)
     ew.writerow(["simTime", "wallTime", "event", "peer", "target", "detail"])
     br = Bridge(a, traci, net, route_ix, ew)
     print(f"SimBridge 起動: スマホ待ち受け {a.bind_host}:{a.bind_port}, 実機 {a.phones} 台, "
-          f"仮想クライアント {'あり' if a.virtual else 'なし'}, 出力 {a.out}")
+          f"仮想クライアント {'あり' if a.virtual else 'なし'}, 離脱円 {a.leave_dist:.0f} m, 出力 {a.out}")
     try:
         br.run()
     except KeyboardInterrupt:

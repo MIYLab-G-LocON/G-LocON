@@ -23,7 +23,8 @@ python build_net.py              # エリア（既定: 1km四方）を切り出�
 python select_edge_servers.py    # その中からランダムにエッジサーバを選ぶ（既定: 10か所）
 python make_scenario.py          # エリア内を自由に走る交通流と急停止イベントを作る
 python run_scenario.py --mode none  --seed 1
-python run_scenario.py --mode ideal --seed 1
+python run_scenario.py --mode ideal --seed 1                     # 離脱円 δ=60m（既定）→ out/ideal_s1_d60
+python run_scenario.py --mode ideal --seed 1 --leave-dist 30     # δ を変えて比較（30 / 60 / 100）
 python summarize.py              # out/summary.csv に比較表
 python run_scenario.py --mode none --gui   # 画面で確認
 ```
@@ -91,6 +92,7 @@ JOIN中の交差点（`glocon.joined`），LEAVE済みの交差点（`glocon.lef
 | `--phones` | 3 | 受け付ける実機の台数 |
 | `--virtual` | なし | 全車両を仮想クライアントとしてエッジサーバに参加させる |
 | `--virtual-max` | 300 | 同時に動かす仮想クライアントの上限（WindowsではソケットはPython全体で約500まで） |
+| `--leave-dist` | 60 | 離脱円の半径 δ [m]（評価では 30 / 60 / 100）。実機にも `SIM_ROUTE` で同じ値を送る。出力フォルダ名の末尾に `_d<δ>` が付く |
 | `--follow-phone` | なし | sumo-gui の画面を実機が乗っている車に追従させる（乗り換えても追従） |
 | `--vloc-all` | なし | 仮想クライアントどうしにも位置を送る（既定は実機にだけ送り，負荷を抑える） |
 | `--speed` | 1.0 | 実時間に対する進み方（実機を使うときは1.0のまま） |
@@ -123,7 +125,7 @@ JOIN中の交差点（`glocon.joined`），LEAVE済みの交差点（`glocon.lef
 | mode | 内容 | 位置づけ |
 |---|---|---|
 | `none` | V2Vなし。急停止の情報は誰にも届かない | 下限 |
-| `ideal` | 本システムと同じ規則（エッジサーバ交差点へのETA<30秒でJOIN，通過して30m離れたらLEAVE）でグループを作り，急停止を同じグループの後続車へ0.3秒後に通知する。通知を受けた車は希望速度を5 m/s まで 2 m/s² で下げ，停止解消後に戻す。通信の損失は無い | 上限（理想通信） |
+| `ideal` | 本システムと同じ規則（エッジサーバ交差点へのETA<30秒でJOIN，通過して δ（既定60m）離れたらLEAVE）でグループを作り，急停止を同じグループの後続車へ0.3秒後に通知する。通知を受けた車は希望速度を5 m/s まで 2 m/s² で下げ，停止解消後に戻す。通信の損失は無い | 上限（理想通信） |
 
 各車両は自分のルートが通るエッジサーバ交差点についてだけJOINする（複数の交差点に同時に参加することもある）。
 段階3以降は，ここに「実機・アプリを通した実際の通信」によるモードを加え，none・ideal と比較する。

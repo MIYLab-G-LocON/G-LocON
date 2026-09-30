@@ -3,6 +3,7 @@ package com.example.test_g_locon.sim;
 import android.util.Log;
 
 import com.example.test_g_locon.navigation.Intersection;
+import com.example.test_g_locon.navigation.IntersectionManager;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -126,6 +127,8 @@ public class SimBridgeClient implements Runnable {
         switch (pt) {
             case "SIM_ROUTE": {
                 vehicleId = m.getString("vehicleId");
+                // 離脱円の半径は SimBridge の設定に合わせる（仮想クライアントと同じ条件で比較するため）
+                if (m.has("leaveDist")) IntersectionManager.setLeaveThresholdM(m.getDouble("leaveDist"));
                 JSONArray arr = m.getJSONArray("intersections");
                 List<Intersection> list = new ArrayList<>();
                 for (int i = 0; i < arr.length(); i++) {
