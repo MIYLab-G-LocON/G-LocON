@@ -6,5 +6,6 @@ import java.util.ArrayList;
 
 public interface IP2P {
     void onGetDetailUserInfo(UserInfo receiveUserInfo, ArrayList<UserInfo> userInfos); //周辺ユーザからデータが送られた場合
+    void onHazardReceived(com.example.test_g_locon.navigation.HazardInfo hazard); //同じグループの車から危険情報が届いた場合
     void onGetPeripheralUsersInfo(ArrayList<UserInfo> userInfos);//シグナリングサーバから周辺ユーザ情報を取得した場合
 }

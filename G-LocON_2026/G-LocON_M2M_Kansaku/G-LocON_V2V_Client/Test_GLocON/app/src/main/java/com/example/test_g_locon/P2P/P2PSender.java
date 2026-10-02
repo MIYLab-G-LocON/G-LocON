@@ -28,9 +28,20 @@ public class P2PSender implements Runnable {
     private final UserInfo myUserInfo;
     private final ArrayList<UserInfo> peripheralUsers;
     private final EP2PProcess eP2PProcess;
+    /** [車両制御] 自車の危険情報（無ければ null） */
+    private final com.example.test_g_locon.navigation.HazardInfo hazard;
+    private final double myBearing;
 
     P2PSender(DatagramSocket socket, int locationUpdateCount, UserInfo myUserInfo,
               ArrayList<UserInfo> peripheralUsers, EP2PProcess eP2PProcess) {
+        this(socket, locationUpdateCount, myUserInfo, peripheralUsers, eP2PProcess, null, 0);
+    }
+
+    P2PSender(DatagramSocket socket, int locationUpdateCount, UserInfo myUserInfo,
+              ArrayList<UserInfo> peripheralUsers, EP2PProcess eP2PProcess,
+              com.example.test_g_locon.navigation.HazardInfo hazard, double myBearing) {
+        this.hazard = hazard;
+        this.myBearing = myBearing;
         this.socket = socket;
         this.locationUpdateCount = locationUpdateCount;
         this.myUserInfo = myUserInfo;
@@ -55,6 +66,10 @@ public class P2PSender implements Runnable {
             jsonObject.put("longitude", myUserInfo.getLongitude());
             jsonObject.put("peerID", myUserInfo.getPeerId());
             jsonObject.put("speed", myUserInfo.getSpeed());
+            if (hazard != null) {
+                jsonObject.put("hazard", hazard.toJson(
+                        myUserInfo.getLatitude(), myUserInfo.getLongitude(), myBearing));
+            }
             byte[] sendData = jsonObject.toString().getBytes();
 
             for (UserInfo peer : peripheralUsers) {

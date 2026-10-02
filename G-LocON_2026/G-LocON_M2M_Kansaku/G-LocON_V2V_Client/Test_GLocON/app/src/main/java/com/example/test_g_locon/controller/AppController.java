@@ -555,6 +555,8 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
      * @param bearing  進行方向（北=0の時計回り）
      */
     private void applyExternalLocation(double lat, double lng, double speedMps, double bearing) {
+        if (p2p != null) p2p.setMyBearing(bearing);
+        expireHazards();
         currentLocation.setLatitude(lat);
         currentLocation.setLongitude(lng);
         myUserInfo.setLatitude(lat);
@@ -568,6 +570,55 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
             p2p.setMyUserInfo(myUserInfo);
             totalGeoUpdateCount++;
             p2p.sendLocation(totalGeoUpdateCount);
+        }
+    }
+
+    // =========================================================
+    // 車両制御: 危険情報（急停止）の受信
+    // =========================================================
+
+    /** 危険情報がこの時間届かなければ解消とみなす（解消通知の取りこぼし対策。SimBridge と同じ） */
+    private static final long HAZARD_HOLD_MS = 3000;
+    /** 接近中と判定した危険情報: hazardId → 最後に受信した時刻 */
+    private final java.util.Map<String, Long> activeHazards = new java.util.concurrent.ConcurrentHashMap<>();
+    /** ルートの線の上での自分の道のり（RouteGeometry 用） */
+    private volatile double routeS = 0;
+
+    /**
+     * 同じ交差点グループの車から危険情報（急停止）が届いた。
+     * その地点が自分のルートの前方にある（接近している）ときだけ警告を出し，
+     * SUMOモードでは SimBridge に VEHICLE_COMMAND を送って乗っている車を減速させる。
+     */
+    @Override
+    public void onHazardReceived(com.example.test_g_locon.navigation.HazardInfo hz) {
+        if (!hz.active) {
+            if (activeHazards.remove(hz.id) != null) clearHazard(hz.id);
+            return;
+        }
+        com.example.test_g_locon.navigation.RouteGeometry.Result r =
+                com.example.test_g_locon.navigation.RouteGeometry.hazardAhead(routeShape,
+                        currentLocation.getLatitude(), currentLocation.getLongitude(), routeS,
+                        hz.lat, hz.lon, hz.bearing);
+        routeS = r.sMe;
+        if (!r.isAhead()) return;                 // 前方ではない（対向・別の道・通過済み）→ 何もしない
+        activeHazards.put(hz.id, System.currentTimeMillis());
+        if (simBridge != null) simBridge.sendVehicleCommand("DECELERATE", hz.id, r.gap);
+        callback.onHazardWarning("前方 " + Math.round(r.gap) + "m で急停止（" + hz.peerId + "）");
+    }
+
+    private void clearHazard(String hazardId) {
+        if (simBridge != null) simBridge.sendVehicleCommand("RESUME", hazardId, -1);
+        if (activeHazards.isEmpty()) callback.onHazardWarning(null);
+    }
+
+    /** 位置の更新のたびに呼び，届かなくなった危険情報を解消する */
+    private void expireHazards() {
+        long now = System.currentTimeMillis();
+        for (java.util.Map.Entry<String, Long> e : activeHazards.entrySet()) {
+            if (now - e.getValue() > HAZARD_HOLD_MS) {
+                activeHazards.remove(e.getKey());
+                clearHazard(e.getKey());
+            }
         }
     }
 
@@ -593,10 +644,20 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
                         final List<double[]> shape = simBridge.getLastRouteShape();
                         routeExecutor.submit(() -> {
                             leaveAllIntersections();
+                            routeS = 0;
+                            activeHazards.clear();
+                            callback.onHazardWarning(null);
                             routeShape = shape;
                             loadRoute(intersections);
                         });
                         callback.onSumoStatus("SUMO車両 " + vehicleId + " に乗車（交差点 " + intersections.size() + "）");
+                    }
+
+                    @Override
+                    public void onSimSelfHazard(com.example.test_g_locon.navigation.HazardInfo hazard) {
+                        // 乗っている車が急停止した → 同じグループへ P2P（SendLocation の hazard）で知らせる
+                        if (p2p != null) p2p.setMyHazard(hazard);
+                        callback.onHazardWarning(hazard.active ? "自車が急停止（グループへ通知中）" : null);
                     }
 
                     @Override

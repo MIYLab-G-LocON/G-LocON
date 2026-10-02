@@ -99,6 +99,11 @@ public class P2PReceiver implements Runnable {
                             p2pJSONObject.getPeerId(),
                             p2pJSONObject.getSpeed()
                     );
+                    // [車両制御] 同じグループの車が急停止などの危険情報を付けてきた
+                    if (jsonObject.has("hazard")) {
+                        iP2PReceiver.onGetHazard(com.example.test_g_locon.navigation.HazardInfo.fromJson(
+                                jsonObject.getJSONObject("hazard"), p2pJSONObject.getPeerId()));
+                    }
                 }
 
             } catch (JSONException e) {

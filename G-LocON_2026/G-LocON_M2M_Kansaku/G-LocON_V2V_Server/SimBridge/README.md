@@ -109,6 +109,8 @@ LEAVE の後の色替えは，**描かれた車の後端が離脱円を出るま
 | `--virtual-max` | 300 | 同時に動かす仮想クライアントの上限（WindowsではソケットはPython全体で約500まで） |
 | `--join-eta` | 15 | 参加タイミング τ [秒]: 交差点までのETAがこれを下回ったらJOIN（評価では 15 / 30 / 45）。実機にも `SIM_ROUTE` で同じ値を送る |
 | `--leave-dist` | 60 | 離脱円の半径 δ [m]（評価では 30 / 60 / 100）。実機にも `SIM_ROUTE` で同じ値を送る。出力フォルダ名の末尾に `_t<τ>_d<δ>` が付く |
+| `--control` | off | 車両制御．`off`=急停止なし，`none`=急停止あり・通知なし（V2Vなし），`system`=急停止の情報をグループ経由(P2P)で送り，接近中の車だけ減速させる |
+| `--warn-speed` | 5.0 | 減速指示を受けた車の目標速度 [m/s] |
 | `--others-radius` | 400 | 実機へ1秒ごとに送る「周りの全車両」の範囲 [m]（アプリの「表示:全車両」用。0で送らない） |
 | `--follow-phone` | なし | sumo-gui の画面を実機が乗っている車に追従させる（乗り換えても追従） |
 | `--vloc-all` | なし | 仮想クライアントどうしにも位置を送る（既定は実機にだけ送り，負荷を抑える） |
@@ -125,6 +127,8 @@ LEAVE の後の色替えは，**描かれた車の後端が離脱円を出るま
 | `events.csv` | 仮想クライアントのJOIN/LEAVE・メンバー受信，実機の割り当て・乗り換え |
 | `consistency.csv` | 毎秒，各仮想クライアントのグループ一覧（エッジサーバから受け取ったもの）と正解（その交差点にJOIN中の車）の比較 |
 | `tripinfo.xml` | 全車両の所要時間など |
+| `hazard_log.csv` | （`--control none / system`）急停止（SUDDEN_STOP），危険情報の送信可否（HAZARD_SEND / HAZARD_NOT_IN_GROUP），受信（NOTIFIED: 遅延・接近中か），減速（DECELERATE）と復帰（RESUME） |
+| `ssm.xml`・`fcd.xml`・`collisions.xml` | （`--control none / system`）`run_scenario.py` と同じ SUMO 出力。`python summarize.py none_s1 ideal_s1_t15_d60 live_...` で同じ指標で比べられる |
 
 グループ一覧の比較では，直近2秒以内にJOIN/LEAVEした車は通知が届く途中の可能性があるため除いている。
 

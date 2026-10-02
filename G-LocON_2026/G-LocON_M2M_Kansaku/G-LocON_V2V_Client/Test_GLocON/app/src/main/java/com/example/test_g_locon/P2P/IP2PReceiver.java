@@ -13,5 +13,6 @@ public interface IP2PReceiver {
     void onDoUDPHolePunchingInGroup(String intersectionId, UserInfo srcUser); //交差点グループに新規車両が参加した時
     void onPeerLeftGroup(String intersectionId, UserInfo leftUser); //交差点グループから他の車両が離脱した時
     void onGetPeripheralUserLocation(int locationUpdateCount, String srcIP, int srcPort, Location location, String peerId, double speed);//ピアからデータを取得時
+    void onGetHazard(com.example.test_g_locon.navigation.HazardInfo hazard); //ピアから危険情報（急停止など）を取得時
     void onGetAck(int locationCount, String endPointIP, int endPointPort);//ACKの送信時
 }

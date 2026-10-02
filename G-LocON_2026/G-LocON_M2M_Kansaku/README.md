@@ -161,8 +161,8 @@ G-LocON_2026/
 | doUDPHolePunching | EdgeServer | Client（他車両） | NATホールパンチング通知 |
 | peerLeft | EdgeServer | Client（残りの車両） | 他の車両がLEAVEしたことの通知．受け取った車両はその交差点グループのメンバーから外す |
 | NATRegisterDstAddrPort | Client | 他車両 | NATに穴を開けるパケット |
-| SendLocation | Client | 他車両 | P2P直接通信（位置情報送信） |
-| VEHICLE_COMMAND | Client | SimBridge | シミュレータ車両への行動指令（減速・復帰など）（未実装） |
+| SendLocation | Client | 他車両 | P2P直接通信（位置情報送信）．急停止中は危険情報 `hazard {id, intersectionId, active, latitude, longitude, bearing}` を付ける（解消時は active=false） |
+| VEHICLE_COMMAND | Client（SUMOモード） | SimBridge | シミュレータ車両への行動指令 `{command: DECELERATE / RESUME, hazardId, gap}`．危険情報を受けて接近中と判定したときに送る |
 | SIM_HELLO / SIM_ROUTE_REQ / SIM_BYE | Client（SUMOモード） | SimBridge | 車両の割り当て要求／ルート再送要求／終了 |
 | SIM_ROUTE | SimBridge | Client（SUMOモード） | 割り当てた車両のルート上の交差点列と道の形（OSRMの結果の代わり），参加タイミング τ・離脱円 δ |
 | SIM_LOCATION | SimBridge | Client（SUMOモード） | 割り当てた車両の位置・速度・進行方向（1秒ごと，GPSの代わり） |
@@ -270,15 +270,23 @@ SUMO ──TraCI── SimBridge ───────────────�
   位置は車の中心（SUMOの車両位置は車の先端なので，車長の半分だけ後ろにずらす．スマホは車内にあるため．仮想クライアントも同じ）
 - **乗り換え**: 車が目的地に着くと `SIM_END` を送り，アプリはJOIN中の交差点から離脱する．SimBridge は次に出発する車を割り当てる（実験中ずっとどこかの車として参加し続ける）
 - **時間同期**: Android側は実時間で通信するため，SimBridgeはSUMOを実時間に合わせて0.5秒ずつ進める（`--speed` で動作確認用に速くできる）
-- **Android → SUMO（予定）**: V2V情報共有に基づき生成した `VEHICLE_COMMAND` をSimBridgeへUDP送信し，TraCIで車両を制御する
+- **車両制御（システム経由，`sim_bridge.py --control system`）**: 危険情報を本システムの経路（交差点グループ＋P2P）で届け，SUMO の車を減速させる
+  1. SUMOの車が急停止する（シナリオの急停止イベント．通信なしの比較と同じ車・同じ場所）
+  2. その車（仮想クライアントまたは実機）が，**参加中の交差点グループのメンバー**へ P2P で危険情報を送る（`SendLocation` の `hazard`，1秒ごと．解消時は active=false）
+  3. 受け取った車は，**危険地点が自分のルートの前方にあるか**を判定する（ルートの線から12m以内・向きの差60度以内・自分より先で400m以内）．
+     対向車・別の道の車・通過済みの車は何もしない（絞り込み）
+  4. 接近中の車だけが `VEHICLE_COMMAND: DECELERATE` を出し，SimBridge がその車の希望速度を 2 m/s² で 5 m/s まで下げる．
+     解消（active=false，または3秒間届かない）で `RESUME`
+  - 仮想クライアントは3〜4をブリッジ内で行い，実機はアプリ（`RouteGeometry`・`AppController.onHazardReceived`）が判定して `VEHICLE_COMMAND` を送る．実機には状態カードに警告を出す
+  - 急停止した車がどのグループにも参加していない場合（τ が小さく，交差点の手前で止まったときなど）は情報を送れない．これは本システムの特性として記録する（`HAZARD_NOT_IN_GROUP`）
 
 ### 6.4 VEHICLE_COMMAND の種類
 
 | command | 内容 | トリガー | TraCIでの実現 |
 |---------|------|---------|--------------|
-| DECELERATE | 目標速度まで減速 | 前方急停止・渋滞情報の受信 | `vehicle.slowDown(id, 目標速度, 所要時間)` |
-| RESUME | 通常速度に復帰 | 危険状況の解消 | `vehicle.setSpeed(id, -1)` |
-| HOLD_SPEED | 現在速度を維持 | 前方渋滞継続中 | `vehicle.setSpeed(id, 現在速度)` |
+| DECELERATE | 目標速度（既定 5 m/s）まで減速 | 前方の急停止の危険情報を受信し，接近中と判定 | 希望速度の上限 `vehicle.setMaxSpeed` を 2 m/s² で段階的に下げる（減速そのものは車両モデルIDMが安全に行う．速度を直接指定すると後続との安全距離が崩れるため） |
+| RESUME | 通常速度に復帰 | 危険情報の解消（active=false または3秒間届かない） | `vehicle.setMaxSpeed(id, 元の値)` |
+| HOLD_SPEED | 現在速度を維持（未実装） | 前方渋滞継続中 | — |
 
 ### 6.5 シナリオ設計の注意点
 
@@ -305,10 +313,10 @@ SUMO ──TraCI── SimBridge ───────────────�
 |------|------|
 | 準備 | 実機3台・エッジサーバ3台でJOIN → P2P通信 → LEAVEを通しで確認 |
 | 1 | 正方形エリアの地図をSUMO用に変換し，全交差点からエッジサーバをランダムに配置，エリア内を自由に走る交通流（シナリオ）を作成 ✅ |
-| 2 | SimBridge（実時間ブリッジ・仮想クライアント・サーバ一括起動）とアプリのSUMOモード ✅（PC上の試験で確認済み．実機での確認待ち） |
-| 3 | モードA：SUMO車両1台をスマホ1台に対応させ，実際の通信で動作確認 |
-| 4 | VEHICLE_COMMANDによる双方向制御 |
-| 5 | モードB：全車両を仮想クライアントとしてエッジサーバに参加させ，実機1台で目視確認 |
+| 2 | SimBridge（実時間ブリッジ・仮想クライアント・サーバ一括起動）とアプリのSUMOモード ✅ |
+| 3 | モードA：SUMO車両1台をスマホ1台に対応させ，実際の通信で動作確認 ✅（実機1台．3台同時は未実施） |
+| 4 | VEHICLE_COMMANDによる双方向制御 ✅（仮想クライアントどうしはPC上の試験で確認済み．実機側は実装済み・実機での確認待ち） |
+| 5 | モードB：全車両を仮想クライアントとしてエッジサーバに参加させ，実機1台で目視確認 ✅ |
 | 6 | 評価（V2Vあり／なし，通常G-LocONとの比較）．評価用ログは段階3までに並行して用意する |
 
 ---

@@ -82,6 +82,13 @@ public interface IAppController {
     /** [SUMOモード] 状態の通知（車の割り当て・到着など） */
     void onSumoStatus(String message);
 
+    /**
+     * [車両制御] 前方の危険情報（同じグループの車の急停止）の表示。
+     *
+     * @param message 表示する文（例:「前方 120m で急停止」）。解消したら null
+     */
+    void onHazardWarning(String message);
+
     /** [SUMOモード] 周りの全車両（P2Pでつながっていない車も含む。1秒ごと）。「表示:全車両」で使う */
     void onSimVehicles(List<com.example.test_g_locon.sim.SimVehicle> vehicles);
 }

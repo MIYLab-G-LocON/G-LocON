@@ -29,6 +29,18 @@
     グループ内の実機へ位置（SendLocation）を1秒ごとに送る（実機の地図に仮想車両として表示される）。
     peerID は "sim-<車両ID>"。
 
+■ 車両制御（--control）
+    off    : 急停止イベントを起こさない（既定。グルーピングの確認用）
+    none   : 急停止イベントを起こすが，情報は誰にも届けない（V2Vなし。比較の下限）
+    system : 急停止した車が，参加中の交差点グループのメンバーへ P2P で危険情報を送る
+             （SendLocation に hazard を付けて1秒ごと，解消時に active=false）。
+             受け取った車は，自分のルートの前方にその地点がある（接近している）ときだけ減速する。
+             減速は VEHICLE_COMMAND（DECELERATE / RESUME）としてブリッジが SUMO に反映する。
+             仮想クライアントは自分で判定してブリッジに依頼し，実機はアプリが判定して
+             VEHICLE_COMMAND {command, hazardId} をブリッジへ送る。
+    none / system では run_scenario.py と同じ SUMO 出力（ssm.xml・fcd.xml・collisions.xml）と hazard_log.csv を出すので，
+    summarize.py で「V2Vなし／理想V2V／本システム」を同じ指標で比べられる。
+
 ■ 出力（out/live_<日時>/）
     events.csv       JOIN/LEAVE送信・返信受信・離脱通知・割り当てなどの時系列
     consistency.csv  各仮想クライアントが持つグループ一覧と，ブリッジが把握している正解（その交差点にJOIN中の仮想クライアント）の比較
@@ -51,6 +63,11 @@ MIN_SPEED = 1.0           # アプリと同じ（ETA計算の最低速度）
 PASS_RADIUS_M = 20.0      # アプリと同じ: この距離まで近づいたら交差点を「通過済み」とする
 PASS_LOOKAHEAD = 3        # アプリと同じ: 通過判定はまだ通過していない最初の交差点からこの個数先まで
 GRACE_SEC = 2.0           # 一覧の一致判定で，直近のJOIN/LEAVEを通知待ちとして除外する時間
+HAZARD_HOLD_SEC = 3.0     # 危険情報がこの時間届かなければ解消とみなして復帰する（解消通知の取りこぼし対策）
+APPROACH_SIDE_M = 12.0    # 危険地点が自分のルートの線からこの距離以内なら「ルート上」とみなす
+APPROACH_ANGLE_DEG = 60.0 # 危険車両の向きと，その地点での自分のルートの向きの差がこれ以内なら同じ方向
+APPROACH_MAX_M = 400.0    # これより先の危険地点は対象外
+DECEL_RATE = 2.0          # 減速指示を受けた車の希望速度の下げ方 [m/s^2]（run_scenario.py の ideal と同じ）
 PENDING_MAX_SEC = 15.0    # 表示の色替えを待つ最大時間（止まった車などで尻尾が円から出ない場合）
 PALETTE = [(230, 25, 75), (60, 180, 75), (255, 225, 25), (0, 130, 200), (245, 130, 48),
            (145, 30, 180), (70, 240, 240), (240, 50, 230), (210, 245, 60), (0, 128, 128)]
@@ -62,6 +79,49 @@ def hubeny(lat1, lon1, lat2, lon2):
     dlon = math.radians(lon2 - lon1)
     m = math.cos(math.radians((lat1 + lat2) / 2))
     return 6378137.0 * math.hypot(dlat, dlon * m)
+
+
+def project_on_path(path, cum, px, py, s_min=-1e9):
+    """折れ線 path（[(x,y)]，cum=各点までの道のり）に点を射影した候補を返す.
+
+    [(道のり s, 線からの距離 d, その区間の向き[度, 北=0の時計回り])] を s の小さい順に返す（s >= s_min のみ）.
+    """
+    out = []
+    for i in range(len(path) - 1):
+        (x1, y1), (x2, y2) = path[i], path[i + 1]
+        dx, dy = x2 - x1, y2 - y1
+        l2 = dx * dx + dy * dy
+        if l2 <= 0:
+            continue
+        u = max(0.0, min(1.0, ((px - x1) * dx + (py - y1) * dy) / l2))
+        s = cum[i] + u * math.sqrt(l2)
+        if s < s_min:
+            continue
+        d = math.hypot(px - (x1 + u * dx), py - (y1 + u * dy))
+        out.append((s, d, math.degrees(math.atan2(dx, dy)) % 360.0))
+    return out
+
+
+def angle_diff(a, b):
+    return abs((a - b + 180.0) % 360.0 - 180.0)
+
+
+def hazard_ahead(path, cum, me_xy, s_last, hx, hy, h_bearing):
+    """危険地点が自分のルートの前方にあるか（アプリでも同じ判定ができるよう，ルートの線と位置・向きだけで決める）.
+
+    戻り値: (前方までの道のり gap [m] または None, 自分の道のり s_me)
+    """
+    mine = project_on_path(path, cum, me_xy[0], me_xy[1], s_last - 5.0)
+    if not mine:
+        return None, s_last
+    s_me = min(mine, key=lambda c: (c[1], c[0]))[0]
+    for s, d, seg_bearing in project_on_path(path, cum, hx, hy, s_me):
+        if d <= APPROACH_SIDE_M and angle_diff(seg_bearing, h_bearing) <= APPROACH_ANGLE_DEG:
+            gap = s - s_me
+            if 0 < gap <= APPROACH_MAX_M:
+                return gap, s_me
+            return None, s_me
+    return None, s_me
 
 
 class Intersection:
@@ -106,6 +166,15 @@ class Bridge:
         self.stats = {"join_sent": 0, "join_replied": 0, "join_rtt": [], "leave_sent": 0,
                       "peer_left_rx": 0, "nat_register_rx": 0, "check": 0, "match": 0,
                       "missing": 0, "extra": 0, "query_fail": 0}
+        # ---- 車両制御（--control none / system）
+        self.hazards = []                   # 急停止イベントの予定（scenario/hazards.json）
+        self.routes = None                  # run_scenario.RouteIndex（交差点までの道のり）
+        self.hw = None                      # hazard_log.csv
+        self.stopping = []                  # 急停止中の車 [{veh, until, iid, hid}]
+        self.warned = {}                    # 減速中の車 vid -> {orig, cur, hazards:{hid: 最後に受信した時刻}}
+        self.notified = set()               # (受信者, hid) 初回受信を記録済み
+        self.ctl = {"stops": 0, "sent_ok": 0, "not_in_group": 0, "notified": 0, "decel": 0,
+                    "ignored": 0, "latency": []}
         self.phone_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.phone_sock.bind((a.bind_host, a.bind_port))
         self.phone_sock.setblocking(False)
@@ -168,6 +237,10 @@ class Bridge:
                 self.log("PHONE_HELLO", ph.peer, "", f"{addr[0]}:{addr[1]}")
         elif pt == "SIM_ROUTE_REQ" and ph and ph.vid:
             self.send_route(ph)
+        elif pt == "VEHICLE_COMMAND" and ph and ph.vid:
+            # 実機のアプリが危険情報を受け取り，接近中と判定した（または解消した）
+            self.vehicle_command(ph.vid, msg.get("command"), msg.get("hazardId", "?"),
+                                 src=ph.peer, gap=msg.get("gap"))
         elif pt == "SIM_BYE" and ph:
             if ph.vid:
                 self.phone_vehicles.pop(ph.vid, None)
@@ -245,7 +318,11 @@ class Bridge:
             self.send_phone(ph, {"processType": "SIM_LOCATION", "vehicleId": vid,
                                  "latitude": lat, "longitude": lon,
                                  "speed": self.t.vehicle.getSpeed(vid),
-                                 "bearing": self.t.vehicle.getAngle(vid), "simTime": self.now()})
+                                 "bearing": self.t.vehicle.getAngle(vid), "simTime": self.now(),
+                                 # 自分の車が急停止中なら知らせる（アプリが SendLocation に hazard を付けて送る）
+                                 **({"hazard": ph.hazard} if ph.hazard else {})})
+            if ph.hazard and not ph.hazard.get("active", True):
+                ph.hazard = None                 # 解消は1回送れば十分
             if pos:
                 self.send_others(ph, vid, pos)
 
@@ -301,6 +378,110 @@ class Bridge:
                 self.stats["extra"] += len(got - truth)
                 w.writerow([f"{self.now():.1f}", iid, c.peer, len(truth), len(got),
                             len(truth - got), len(got - truth)])
+
+    # ---------- 車両制御（急停止イベントと VEHICLE_COMMAND） ----------
+    def hlog(self, iid, hv, event, target="", detail=""):
+        if self.hw:
+            self.hw.writerow([f"{self.now():.1f}", iid, hv, event, target, detail])
+
+    def step_hazards(self):
+        """急停止イベントの発生・維持・解除（run_scenario.py と同じ条件。車両IDと場所が同じなので比較できる）."""
+        t, now = self.t, self.now()
+        for h in self.hazards:
+            if h.get("done"):
+                continue
+            v = h["vehicle"]
+            if v not in self.alive:
+                if h.get("seen"):
+                    h["done"] = True
+                    self.hlog(h["intersectionId"], v, "SKIP_ARRIVED")
+                continue
+            h["seen"] = True
+            d = self.routes.distance(v, h["intersectionId"])
+            if d is None:
+                h["done"] = True
+                self.hlog(h["intersectionId"], v, "SKIP_PASSED")
+                continue
+            spd = t.vehicle.getSpeed(v)
+            if d > h["trigger_m"] or spd < 3.0:
+                continue
+            h["done"] = True
+            t.vehicle.setDecel(v, h["decel"])
+            t.vehicle.slowDown(v, 0.0, max(spd / h["decel"], 0.5))
+            hid = f"{v}@{now:.0f}"
+            self.stopping.append({"veh": v, "until": now + h["stop_sec"] + spd / h["decel"],
+                                  "iid": h["intersectionId"], "hid": hid})
+            self.ctl["stops"] += 1
+            self.hlog(h["intersectionId"], v, "SUDDEN_STOP", "", f"speed={spd:.1f},dist={d:.1f}")
+            if self.a.control == "system":
+                self.set_hazard(v, {"id": hid, "intersectionId": h["intersectionId"], "active": True})
+        for s in list(self.stopping):
+            v = s["veh"]
+            if v not in self.alive:
+                self.stopping.remove(s)
+                continue
+            if now >= s["until"]:
+                t.vehicle.setSpeed(v, -1)
+                t.vehicle.setDecel(v, 3.0)
+                self.stopping.remove(s)
+                self.hlog(s["iid"], v, "RESUME_HAZARD")
+                if self.a.control == "system":
+                    self.set_hazard(v, {"id": s["hid"], "intersectionId": s["iid"], "active": False})
+            else:
+                t.vehicle.setSpeed(v, 0.0)
+
+    def set_hazard(self, vid, hz):
+        """急停止した車（仮想クライアントまたは実機）に，危険情報を送らせる."""
+        c = self.clients.get(vid)
+        if c:
+            c.hazard = hz
+            if hz["active"]:
+                c.announce_hazard_state()
+        ph = self.phone_vehicles.get(vid)
+        if ph:
+            ph.hazard = hz
+        if not c and not ph and hz["active"]:
+            # 仮想クライアントも実機も付いていない車（--virtual なし，上限超過など）は送れない
+            self.ctl["not_in_group"] += 1
+            self.hlog(hz["intersectionId"], vid, "HAZARD_NO_CLIENT")
+
+    def vehicle_command(self, vid, command, hid, src="", gap=None):
+        """VEHICLE_COMMAND: 危険情報を受けて接近中と判定した車を減速させる／解消で戻す."""
+        if vid not in self.alive:
+            return
+        now = self.now()
+        w = self.warned.get(vid)
+        if command == "DECELERATE":
+            if w is None:
+                w = self.warned[vid] = {"orig": self.t.vehicle.getMaxSpeed(vid),
+                                        "cur": max(self.t.vehicle.getSpeed(vid), self.a.warn_speed),
+                                        "hazards": {}}
+            if hid not in w["hazards"]:
+                self.ctl["decel"] += 1
+                self.hlog("", hid.split("@")[0], "DECELERATE", vid,
+                          f"gap={gap:.1f}" if isinstance(gap, (int, float)) else f"src={src}")
+            w["hazards"][hid] = now
+        elif command == "RESUME" and w is not None:
+            w["hazards"].pop(hid, None)
+
+    def step_warned(self, step_len):
+        """減速中の車の希望速度を段階的に下げ，危険情報が無くなったら元に戻す."""
+        now = self.now()
+        for vid, w in list(self.warned.items()):
+            if vid not in self.alive:
+                del self.warned[vid]
+                continue
+            for hid, last in list(w["hazards"].items()):
+                if now - last > HAZARD_HOLD_SEC:
+                    del w["hazards"][hid]
+            if w["hazards"]:
+                # 希望速度（上限）を下げる。減速そのものは車両モデル（IDM）が安全に行う
+                w["cur"] = max(self.a.warn_speed, w["cur"] - DECEL_RATE * step_len)
+                self.t.vehicle.setMaxSpeed(vid, w["cur"])
+            else:
+                self.t.vehicle.setMaxSpeed(vid, w["orig"])
+                del self.warned[vid]
+                self.hlog("", "", "RESUME", vid)
 
     def mark_phone(self, vid, ph):
         """sumo-gui で実機が乗っている車を目立たせる（紫の大きな円で囲み，ラベルに端末名を出す）."""
@@ -373,6 +554,10 @@ class Bridge:
                 self.assign_phones(departed)
                 if self.a.virtual:
                     self.update_virtual(departed, arrived)
+                if self.a.control != "off":
+                    self.step_hazards()        # 仮想クライアントを作った後（出発直後の急停止でも送れるように）
+                if self.a.control == "system":
+                    self.step_warned(step)
                 if self.now() >= next_update:
                     next_update = self.now() + UPDATE_SEC
                     self.update_phones(arrived)
@@ -393,6 +578,7 @@ class Bridge:
 class Phone:
     def __init__(self, peer, addr):
         self.peer, self.addr, self.vid = peer, addr, None
+        self.hazard = None                  # 乗っている車が急停止中なら {id, intersectionId, active}
 
 
 class VirtualClient:
@@ -412,6 +598,21 @@ class VirtualClient:
         self.count = 0
         self.next_tick = br.now()
         self.queried = False
+        # 車両制御用: 自分のルートの線（SUMO座標）と，急停止中なら送る危険情報
+        self.path, self.cum, self.s_me = [], [], 0.0
+        self.hazard = None
+        if br.a.control == "system":
+            route = br.t.vehicle.getRoute(vid)
+            idx = max(br.t.vehicle.getRouteIndex(vid), 0)
+            for e in route[idx:]:
+                for p in br.net.getEdge(e).getShape():
+                    if not self.path or self.path[-1] != p:
+                        self.path.append(p)
+            d = 0.0
+            for i, p in enumerate(self.path):
+                if i:
+                    d += math.hypot(p[0] - self.path[i - 1][0], p[1] - self.path[i - 1][1])
+                self.cum.append(d)
         self.query()
 
     # アプリの UserInfo 相当
@@ -494,15 +695,59 @@ class VirtualClient:
         for iid, mem in self.members.items():
             if self.ix[iid].joined:
                 for p in mem:
-                    if br.a.vloc_all or not p.startswith("sim-"):
+                    # 急停止中（危険情報あり）は，仮想車両を含むグループの全員へ送る
+                    if br.a.vloc_all or self.hazard or not p.startswith("sim-"):
                         if p in self.addrs:
                             targets[p] = self.addrs[p]
         if targets:
             msg = {"processType": "SendLocation", "locationUpdateCount": self.count,
                    "latitude": lat, "longitude": lon, "peerID": self.peer,
                    "speed": br.t.vehicle.getSpeed(self.vid) * 3.6}
+            if self.hazard:
+                msg["hazard"] = dict(self.hazard, latitude=lat, longitude=lon,
+                                     bearing=br.t.vehicle.getAngle(self.vid), sentWall=time.time())
             for addr in targets.values():
                 self.send(msg, addr)
+        if self.hazard and not self.hazard["active"]:
+            self.hazard = None                 # 解消は1回送れば十分（届かなくても受信側が時間切れで復帰する）
+
+    def announce_hazard_state(self):
+        """急停止した時点で，危険情報を届けられる相手（参加中のグループのメンバー）がいるかを記録する."""
+        br = self.br
+        n = len({p for iid, mem in self.members.items() if self.ix[iid].joined for p in mem if p in self.addrs})
+        joined = [i.iid for i in self.ix.values() if i.joined]
+        if joined:
+            br.ctl["sent_ok"] += 1
+            br.hlog(self.hazard["intersectionId"], self.vid, "HAZARD_SEND", "", f"groups={len(joined)},members={n}")
+        else:
+            br.ctl["not_in_group"] += 1
+            br.hlog(self.hazard["intersectionId"], self.vid, "HAZARD_NOT_IN_GROUP")
+        self.next_tick = br.now()              # 次の更新を待たずにすぐ送る
+
+    def on_hazard(self, msg):
+        """同じグループの車から届いた危険情報。接近中のときだけ減速を依頼する."""
+        br, hz = self.br, msg["hazard"]
+        hid = hz.get("id", "?")
+        if not hz.get("active", True):
+            br.vehicle_command(self.vid, "RESUME", hid)
+            return
+        if self.vid not in br.alive or not self.path:
+            return
+        hx, hy = br.net.convertLonLat2XY(hz["longitude"], hz["latitude"])
+        gap, self.s_me = hazard_ahead(self.path, self.cum, common.vehicle_xy(br.t, self.vid), self.s_me,
+                                      hx, hy, hz.get("bearing", 0.0))
+        key = (self.vid, hid)
+        if key not in br.notified:
+            br.notified.add(key)
+            br.ctl["notified"] += 1
+            lat_ms = (time.time() - hz["sentWall"]) * 1000 if "sentWall" in hz else -1
+            br.ctl["latency"].append(lat_ms)
+            if gap is None:
+                br.ctl["ignored"] += 1
+            br.hlog(hz.get("intersectionId", ""), msg.get("peerID", "").replace("sim-", ""),
+                    "NOTIFIED", self.vid, f"latency_ms={lat_ms:.1f},approaching={gap is not None}")
+        if gap is not None:
+            br.vehicle_command(self.vid, "DECELERATE", hid, gap=gap)
 
     def show_state(self):
         """sumo-gui の車両の右クリック→「Show Parameter」に，グループの状態を表示する."""
@@ -544,9 +789,13 @@ class VirtualClient:
             br.log("V_QUERY_OK", self.peer, "", f"es={sum(1 for i in self.ix.values() if i.es)}")
             self.show_state()
             return
+        if pt == "SendLocation":
+            if "hazard" in msg and br.a.control == "system":
+                self.on_hazard(msg)
+            return
         iid = msg.get("intersectionId")
         if iid not in self.ix:
-            return                                       # SendLocation・NAT登録パケットなど
+            return                                       # NAT登録パケットなど
         if pt == "getPeripheralUserInfoList":
             mem = set()
             for u in msg.get("userList", []):
@@ -592,6 +841,11 @@ def main():
     ap.add_argument("--gui", action="store_true", help="sumo-gui で表示し，グループごとに色分けする")
     ap.add_argument("--join-eta", type=float, default=common.JOIN_ETA_SEC,
                     help="参加タイミング τ [秒]: 交差点までのETAがこれを下回ったらJOIN（実機にも同じ値を送る）。評価では 15 / 30 / 45")
+    ap.add_argument("--control", choices=["off", "none", "system"], default="off",
+                    help="車両制御: off=急停止なし（既定），none=急停止あり・通知なし，"
+                         "system=急停止の情報をグループ経由(P2P)で送り，接近中の車だけ減速させる")
+    ap.add_argument("--warn-speed", type=float, default=5.0, help="減速指示を受けた車の目標速度 [m/s]")
+    ap.add_argument("--no-fcd", action="store_true", help="--control 時に fcd.xml を出力しない（急制動の集計ができなくなる）")
     ap.add_argument("--leave-dist", type=float, default=common.LEAVE_DIST_M,
                     help="離脱円の半径 δ [m]（実機にも同じ値を送る）。評価では 30 / 60 / 100")
     ap.add_argument("--follow-phone", action="store_true",
@@ -618,6 +872,7 @@ def main():
     common.LEAVE_DIST_M = a.leave_dist
     common.JOIN_ETA_SEC = a.join_eta
     a.out = os.path.join(common.OUT_DIR, time.strftime("live_%Y%m%d_%H%M%S")
+                         + (f"_{a.control}" if a.control != "off" else "")
                          + f"_t{int(a.join_eta)}_d{int(a.leave_dist)}")
     os.makedirs(a.out, exist_ok=True)
 
@@ -633,6 +888,16 @@ def main():
     cmd = [common.sumo_bin("sumo-gui" if a.gui else "sumo"), "-c", cfg, "--seed", str(a.seed),
            "--no-step-log", "true", "--no-warnings", "true",
            "--tripinfo-output", os.path.join(a.out, "tripinfo.xml")]
+    if a.control != "off":
+        # run_scenario.py と同じ出力（summarize.py で V2Vなし／理想V2V と同じ指標で比べる）
+        cmd += ["--device.ssm.probability", "1", "--device.ssm.measures", "TTC PET DRAC",
+                "--device.ssm.thresholds", "3.0 2.0 3.0", "--device.ssm.range", "50",
+                "--device.ssm.file", os.path.join(a.out, "ssm.xml"),
+                "--device.emissions.probability", "1",
+                "--collision.action", "warn", "--collision.check-junctions", "true",
+                "--collision-output", os.path.join(a.out, "collisions.xml")]
+        if not a.no_fcd:
+            cmd += ["--fcd-output", os.path.join(a.out, "fcd.xml"), "--fcd-output.acceleration", "true"]
     if a.gui:
         cmd += ["--start", "--quit-on-end", "--delay", "0", "--window-size", "1400,1000",
                 "--gui-settings-file", os.path.join(common.HERE, "gui_settings.xml")]
@@ -655,8 +920,18 @@ def main():
     ew = csv.writer(ef)
     ew.writerow(["simTime", "wallTime", "event", "peer", "target", "detail"])
     br = Bridge(a, traci, net, route_ix, ew)
+    hf = None
+    if a.control != "off":
+        from run_scenario import RouteIndex
+        with open(os.path.join(common.SCENARIO_DIR, "hazards.json"), encoding="utf-8") as f:
+            br.hazards = json.load(f)
+        br.routes = RouteIndex(traci, net, common.read_sim_edge_servers())
+        hf = open(os.path.join(a.out, "hazard_log.csv"), "w", newline="", encoding="utf-8")
+        br.hw = csv.writer(hf)
+        br.hw.writerow(["t", "intersectionId", "hazard_vehicle", "event", "target", "detail"])
     print(f"SimBridge 起動: スマホ待ち受け {a.bind_host}:{a.bind_port}, 実機 {a.phones} 台, "
-          f"仮想クライアント {'あり' if a.virtual else 'なし'}, 参加 ETA<{a.join_eta:.0f}秒, 離脱円 {a.leave_dist:.0f} m, 出力 {a.out}")
+          f"仮想クライアント {'あり' if a.virtual else 'なし'}, 参加 ETA<{a.join_eta:.0f}秒, 離脱円 {a.leave_dist:.0f} m, "
+          f"車両制御 {a.control}, 出力 {a.out}")
     try:
         br.run()
     except KeyboardInterrupt:
@@ -667,6 +942,8 @@ def main():
         except Exception:
             pass
         ef.close()
+        if hf:
+            hf.close()
         s = br.stats
         rtt = sorted(s["join_rtt"])
         lines = [
@@ -678,6 +955,17 @@ def main():
             f"グループ一覧の一致率 {100 * s['match'] / max(s['check'], 1):.1f}% "
             f"({s['match']}/{s['check']} 回), 欠け {s['missing']} 件, 余分 {s['extra']} 件",
         ]
+        if a.control != "off":
+            c = br.ctl
+            lat = sorted(x for x in c["latency"] if x >= 0)
+            lines.append(f"車両制御 {a.control}: 急停止 {c['stops']} 件")
+            if a.control == "system":
+                lines += [
+                    f"  危険情報を送れた（グループ参加中）{c['sent_ok']} 件 / 送れなかった（未参加）{c['not_in_group']} 件",
+                    f"  受信 {c['notified']} 台・件（接近中と判定して減速 {c['decel']}，初回受信時に対象外 {c['ignored']}）",
+                    f"  通知の遅延 中央値 {lat[len(lat) // 2]:.1f} ms, 95% {lat[int(len(lat) * .95)]:.1f} ms"
+                    if lat else "  通知の遅延 -",
+                ]
         with open(os.path.join(a.out, "summary.txt"), "w", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
         print("\n".join(lines))

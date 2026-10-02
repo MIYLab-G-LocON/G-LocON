@@ -41,6 +41,8 @@ public class SimBridgeClient implements Runnable {
         void onSimLocation(double lat, double lng, double speedMps, double bearing);
         /** 車が目的地に着いた（次の車の割り当てを待つ） */
         void onSimEnd(String vehicleId);
+        /** 乗っている車が急停止した／解消した（SimBridge の --control system）。同じグループへ P2P で知らせる */
+        default void onSimSelfHazard(com.example.test_g_locon.navigation.HazardInfo hazard) {}
         /** 周りの全車両（P2Pでつながっていない車も含む。1秒ごと） */
         default void onSimVehicles(List<SimVehicle> vehicles) {}
     }
@@ -75,6 +77,29 @@ public class SimBridgeClient implements Runnable {
         new Thread(() -> {
             sendNow(s, "SIM_BYE");
             s.close();
+        }).start();
+    }
+
+    /**
+     * [車両制御] 危険情報を受けて接近中と判定した（DECELERATE）／解消した（RESUME）ことを SimBridge に伝え，
+     * 乗っている SUMO の車を減速・復帰させる。
+     */
+    public void sendVehicleCommand(String command, String hazardId, double gapM) {
+        final DatagramSocket s = socket;
+        if (s == null || vehicleId == null) return;
+        new Thread(() -> {
+            try {
+                JSONObject o = new JSONObject();
+                o.put("processType", "VEHICLE_COMMAND");
+                o.put("peerID", peerId);
+                o.put("command", command);
+                o.put("hazardId", hazardId);
+                if (gapM > 0) o.put("gap", gapM);
+                byte[] d = o.toString().getBytes();
+                s.send(new DatagramPacket(d, d.length, InetAddress.getByName(bridgeIp), bridgePort));
+            } catch (Exception e) {
+                Log.d(TAG, "送信エラー: " + e);
+            }
         }).start();
     }
 
@@ -164,6 +189,12 @@ public class SimBridgeClient implements Runnable {
                 if (!vid.equals(vehicleId)) {      // ルートを取りこぼした → 再送を依頼
                     send("SIM_ROUTE_REQ");
                     return;
+                }
+                if (m.has("hazard")) {
+                    JSONObject h = m.getJSONObject("hazard");
+                    listener.onSimSelfHazard(new com.example.test_g_locon.navigation.HazardInfo(
+                            h.optString("id", "?"), h.optString("intersectionId", ""), h.optBoolean("active", true),
+                            m.getDouble("latitude"), m.getDouble("longitude"), m.getDouble("bearing"), peerId));
                 }
                 listener.onSimLocation(m.getDouble("latitude"), m.getDouble("longitude"),
                         m.getDouble("speed"), m.getDouble("bearing"));

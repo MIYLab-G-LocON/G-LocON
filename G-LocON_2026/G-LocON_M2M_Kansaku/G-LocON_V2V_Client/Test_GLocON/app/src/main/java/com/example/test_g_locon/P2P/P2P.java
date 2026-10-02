@@ -36,6 +36,12 @@ public class P2P implements IP2PReceiver {
     private final DatagramSocket socket;
     private UserInfo myUserInfo;
     private volatile ArrayList<UserInfo> peripheralUsers;
+    /** [車両制御] 自車の危険情報（急停止中など）。null でなければ SendLocation に付けて送る */
+    private volatile com.example.test_g_locon.navigation.HazardInfo myHazard = null;
+    private volatile double myBearing = 0;
+
+    public void setMyHazard(com.example.test_g_locon.navigation.HazardInfo hazard) { myHazard = hazard; }
+    public void setMyBearing(double bearing) { myBearing = bearing; }
     /**
      * [V2V] 交差点グループごとのメンバー一覧（intersectionId → メンバー）。
      * 複数交差点に同時参加している場合も互いに上書きしないよう分けて保持し，
@@ -113,8 +119,11 @@ public class P2P implements IP2PReceiver {
 
     public void sendLocation(int locationUpdateCount) {
         MemoryToCSV_Send(locationUpdateCount);
+        final com.example.test_g_locon.navigation.HazardInfo hz = myHazard;
+        if (hz != null && !hz.active) myHazard = null;      // 解消は1回送れば十分
         executor.execute(new P2PSender(
-                socket, locationUpdateCount, myUserInfo, peripheralUsers, EP2PProcess.SendLocation));
+                socket, locationUpdateCount, myUserInfo, peripheralUsers, EP2PProcess.SendLocation,
+                hz, myBearing));
     }
 
     // =========================================================
@@ -234,6 +243,11 @@ public class P2P implements IP2PReceiver {
                 return;
             }
         }
+    }
+
+    @Override
+    public void onGetHazard(com.example.test_g_locon.navigation.HazardInfo hazard) {
+        iP2P.onHazardReceived(hazard);
     }
 
     @Override

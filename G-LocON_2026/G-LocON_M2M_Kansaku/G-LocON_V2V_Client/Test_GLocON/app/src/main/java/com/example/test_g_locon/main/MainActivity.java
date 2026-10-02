@@ -499,8 +499,16 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     }
 
     /** 状態カードの1行目（走行モード）と丸の色 */
+    private volatile int lastModeColor = R.color.mode_gps;
+
     private void setMode(String title, int colorRes) {
+        lastModeColor = colorRes;
         runOnUiThread(() -> {
+            if (modeTitleBeforeHazard != null) {      // 警告の表示中は，戻すときの表示だけ更新する
+                modeTitleBeforeHazard = title;
+                modeColorBeforeHazard = colorRes;
+                return;
+            }
             statusTitle.setText(title);
             statusDot.setBackgroundTintList(ColorStateList.valueOf(getColor(colorRes)));
         });
@@ -609,6 +617,32 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     public void onSumoStatus(String message) {
         // 車の割り当て・到着は状態カードの1行目に出す（トーストは出さない）
         setMode(message, R.color.mode_sumo);
+    }
+
+    /** 危険情報の表示中は，状態カードの1行目を警告に差し替える（解消したら元の表示に戻す） */
+    private String modeTitleBeforeHazard = null;
+    private int modeColorBeforeHazard = R.color.mode_gps;
+
+    @Override
+    public void onHazardWarning(String message) {
+        runOnUiThread(() -> {
+            if (message != null) {
+                if (modeTitleBeforeHazard == null) {
+                    modeTitleBeforeHazard = statusTitle.getText().toString();
+                    modeColorBeforeHazard = lastModeColor;
+                }
+                statusTitle.setText("⚠ " + message);
+                statusDot.setBackgroundTintList(ColorStateList.valueOf(getColor(R.color.btn_end_bg)));
+                statusCard.setStrokeColor(getColor(R.color.btn_end_bg));
+                statusCard.setStrokeWidth((int) (3 * getResources().getDisplayMetrics().density));
+            } else if (modeTitleBeforeHazard != null) {
+                statusTitle.setText(modeTitleBeforeHazard);
+                statusDot.setBackgroundTintList(ColorStateList.valueOf(getColor(modeColorBeforeHazard)));
+                statusCard.setStrokeColor(getColor(R.color.panel_stroke));
+                statusCard.setStrokeWidth((int) getResources().getDisplayMetrics().density);
+                modeTitleBeforeHazard = null;
+            }
+        });
     }
 
     @Override
