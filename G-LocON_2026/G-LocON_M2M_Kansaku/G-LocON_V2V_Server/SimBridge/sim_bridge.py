@@ -40,6 +40,8 @@
              VEHICLE_COMMAND {command, hazardId} をブリッジへ送る。
     none / system では run_scenario.py と同じ SUMO 出力（ssm.xml・fcd.xml・collisions.xml）と hazard_log.csv を出すので，
     summarize.py で「V2Vなし／理想V2V／本システム」を同じ指標で比べられる。
+    followers.csv には，急停止した車に後ろから近づいた車（正解）と，その車に減速指示が届いたかを記録する。
+    --hazard-rule follower で，後続車がいるときだけ急停止させる（run_scenario.py と同じ）。
 
 ■ 出力（out/live_<日時>/）
     events.csv       JOIN/LEAVE送信・返信受信・離脱通知・割り当てなどの時系列
@@ -56,6 +58,7 @@ import socket
 import time
 
 import common
+import hazard_eval
 
 KEEPALIVE_SEC = 15.0
 UPDATE_SEC = 1.0          # アプリと同じ1秒ごとの位置更新
@@ -67,7 +70,6 @@ HAZARD_HOLD_SEC = 3.0     # 危険情報がこの時間届かなければ解消�
 APPROACH_SIDE_M = 12.0    # 危険地点が自分のルートの線からこの距離以内なら「ルート上」とみなす
 APPROACH_ANGLE_DEG = 60.0 # 危険車両の向きと，その地点での自分のルートの向きの差がこれ以内なら同じ方向
 APPROACH_MAX_M = 400.0    # これより先の危険地点は対象外
-DECEL_RATE = 2.0          # 減速指示を受けた車の希望速度の下げ方 [m/s^2]（run_scenario.py の ideal と同じ）
 PENDING_MAX_SEC = 15.0    # 表示の色替えを待つ最大時間（止まった車などで尻尾が円から出ない場合）
 PALETTE = [(230, 25, 75), (60, 180, 75), (255, 225, 25), (0, 130, 200), (245, 130, 48),
            (145, 30, 180), (70, 240, 240), (240, 50, 230), (210, 245, 60), (0, 128, 128)]
@@ -171,7 +173,9 @@ class Bridge:
         self.routes = None                  # run_scenario.RouteIndex（交差点までの道のり）
         self.hw = None                      # hazard_log.csv
         self.stopping = []                  # 急停止中の車 [{veh, until, iid, hid}]
-        self.warned = {}                    # 減速中の車 vid -> {orig, cur, hazards:{hid: 最後に受信した時刻}}
+        self.warned = {}                    # 減速中の車 vid -> {orig, hazards:{hid: 最後に受信した時刻}}
+        self.followers = None               # 急停止した車に近づいた車の記録（hazard_eval.FollowerTracker）
+        self.last_stop = {}                 # 交差点 → 最後に急停止させた時刻（--hazard-rule follower）
         self.notified = set()               # (受信者, hid) 初回受信を記録済み
         self.ctl = {"stops": 0, "sent_ok": 0, "not_in_group": 0, "notified": 0, "decel": 0,
                     "ignored": 0, "latency": []}
@@ -405,12 +409,17 @@ class Bridge:
             spd = t.vehicle.getSpeed(v)
             if d > h["trigger_m"] or spd < 3.0:
                 continue
+            if self.a.hazard_rule == "follower":
+                if (now - self.last_stop.get(h["intersectionId"], -1e9) < hazard_eval.SAME_ES_INTERVAL
+                        or not hazard_eval.follower_exists(t, v, self.alive)):
+                    continue               # 後続車が現れるのを待つ（交差点を過ぎたら SKIP_PASSED）
+                self.last_stop[h["intersectionId"]] = now
             h["done"] = True
             t.vehicle.setDecel(v, h["decel"])
             t.vehicle.slowDown(v, 0.0, max(spd / h["decel"], 0.5))
             hid = f"{v}@{now:.0f}"
             self.stopping.append({"veh": v, "until": now + h["stop_sec"] + spd / h["decel"],
-                                  "iid": h["intersectionId"], "hid": hid})
+                                  "iid": h["intersectionId"], "hid": hid, "t0": now})
             self.ctl["stops"] += 1
             self.hlog(h["intersectionId"], v, "SUDDEN_STOP", "", f"speed={spd:.1f},dist={d:.1f}")
             if self.a.control == "system":
@@ -453,9 +462,7 @@ class Bridge:
         w = self.warned.get(vid)
         if command == "DECELERATE":
             if w is None:
-                w = self.warned[vid] = {"orig": self.t.vehicle.getMaxSpeed(vid),
-                                        "cur": max(self.t.vehicle.getSpeed(vid), self.a.warn_speed),
-                                        "hazards": {}}
+                w = self.warned[vid] = {"orig": self.t.vehicle.getMaxSpeed(vid), "hazards": {}}
             if hid not in w["hazards"]:
                 self.ctl["decel"] += 1
                 self.hlog("", hid.split("@")[0], "DECELERATE", vid,
@@ -475,9 +482,7 @@ class Bridge:
                 if now - last > HAZARD_HOLD_SEC:
                     del w["hazards"][hid]
             if w["hazards"]:
-                # 希望速度（上限）を下げる。減速そのものは車両モデル（IDM）が安全に行う
-                w["cur"] = max(self.a.warn_speed, w["cur"] - DECEL_RATE * step_len)
-                self.t.vehicle.setMaxSpeed(vid, w["cur"])
+                hazard_eval.slow_down_step(self.t, vid, self.a.warn_speed, step_len)
             else:
                 self.t.vehicle.setMaxSpeed(vid, w["orig"])
                 del self.warned[vid]
@@ -558,6 +563,8 @@ class Bridge:
                     self.step_hazards()        # 仮想クライアントを作った後（出発直後の急停止でも送れるように）
                 if self.a.control == "system":
                     self.step_warned(step)
+                if self.followers:
+                    self.followers.step(self.now(), self.stopping, self.warned, self.alive)
                 if self.now() >= next_update:
                     next_update = self.now() + UPDATE_SEC
                     self.update_phones(arrived)
@@ -844,6 +851,8 @@ def main():
     ap.add_argument("--control", choices=["off", "none", "system"], default="off",
                     help="車両制御: off=急停止なし（既定），none=急停止あり・通知なし，"
                          "system=急停止の情報をグループ経由(P2P)で送り，接近中の車だけ減速させる")
+    ap.add_argument("--hazard-rule", choices=["fixed", "follower"], default="fixed",
+                    help="急停止の起こし方（follower=後ろ20〜150mに後続車がいるときだけ。run_scenario.py と同じ）")
     ap.add_argument("--warn-speed", type=float, default=5.0, help="減速指示を受けた車の目標速度 [m/s]")
     ap.add_argument("--no-fcd", action="store_true", help="--control 時に fcd.xml を出力しない（急制動の集計ができなくなる）")
     ap.add_argument("--leave-dist", type=float, default=common.LEAVE_DIST_M,
@@ -873,7 +882,8 @@ def main():
     common.JOIN_ETA_SEC = a.join_eta
     a.out = os.path.join(common.OUT_DIR, time.strftime("live_%Y%m%d_%H%M%S")
                          + (f"_{a.control}" if a.control != "off" else "")
-                         + f"_t{int(a.join_eta)}_d{int(a.leave_dist)}")
+                         + f"_t{int(a.join_eta)}_d{int(a.leave_dist)}"
+                         + ("_hf" if a.control != "off" and a.hazard_rule == "follower" else ""))
     os.makedirs(a.out, exist_ok=True)
 
     common.sumo_home()
@@ -923,8 +933,8 @@ def main():
     hf = None
     if a.control != "off":
         from run_scenario import RouteIndex
-        with open(os.path.join(common.SCENARIO_DIR, "hazards.json"), encoding="utf-8") as f:
-            br.hazards = json.load(f)
+        br.hazards = hazard_eval.load_hazards(a.hazard_rule)
+        br.followers = hazard_eval.FollowerTracker(traci, os.path.join(a.out, "followers.csv"))
         br.routes = RouteIndex(traci, net, common.read_sim_edge_servers())
         hf = open(os.path.join(a.out, "hazard_log.csv"), "w", newline="", encoding="utf-8")
         br.hw = csv.writer(hf)
@@ -944,6 +954,8 @@ def main():
         ef.close()
         if hf:
             hf.close()
+        if br.followers:
+            br.followers.close()
         s = br.stats
         rtt = sorted(s["join_rtt"])
         lines = [

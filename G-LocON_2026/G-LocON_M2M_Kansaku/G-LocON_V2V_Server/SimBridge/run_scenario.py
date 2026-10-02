@@ -7,7 +7,7 @@
 mode:
     none  : V2Vなし（下限）。急停止の情報は誰にも届かない
     ideal : 理想V2V（上限）。本システムと同じ規則（ETA<τでJOIN，通過してδ離れたらLEAVE）で
-            交差点グループを作り，急停止が起きたら同じグループの後続車へ latency 秒後に通知，
+            交差点グループを作り，急停止が起きたら同じグループの後続車（400m以内）へ latency 秒後から通知し続け，
             後続車は希望速度を warn-speed に下げて減速（DECELERATE）し，解消後に復帰（RESUME）する。
             通信の損失・遅延のばらつきは無い。実機・アプリをつないだ実験（段階3以降）の比較対象になる。
 
@@ -17,6 +17,12 @@ mode:
     tripinfo.xml 車両ごとの所要時間・停止時間・燃料
     group_log.csv  交差点グループの参加・離脱（正解データ）
     hazard_log.csv 急停止イベントと通知の記録
+    followers.csv  急停止した車に後ろから近づいた車（正解）と，その車が減速指示を受けたか・ブレーキの強さ
+
+--hazard-rule:
+    fixed    : 決めた 40 台が交差点の手前で必ず急停止する（scenario/hazards.json）。後続車がいない場合も多い
+    follower : 候補の車（scenario/hazard_candidates.json）が交差点の手前に来たとき，
+               後ろ 20〜150m に後続車がいるときだけ急停止する（通知の効果を見るための設定）
 """
 import argparse
 import csv
@@ -24,6 +30,7 @@ import json
 import os
 
 import common
+import hazard_eval
 
 
 def parse():
@@ -35,6 +42,8 @@ def parse():
     ap.add_argument("--gui", action="store_true")
     ap.add_argument("--no-fcd", action="store_true", help="fcd.xmlを出力しない（高速化）")
     ap.add_argument("--tag", default="")
+    ap.add_argument("--hazard-rule", choices=["fixed", "follower"], default="fixed",
+                    help="急停止の起こし方（follower=後続車がいるときだけ）")
     ap.add_argument("--leave-dist", type=float, default=common.LEAVE_DIST_M, help="離脱円の半径 δ [m]")
     ap.add_argument("--join-eta", type=float, default=common.JOIN_ETA_SEC, help="参加タイミング τ [秒]")
     return ap.parse_args()
@@ -123,7 +132,8 @@ def main():
     common.JOIN_ETA_SEC = a.join_eta
     # τ・δ はグループを作る ideal にだけ効くので，ideal の名前にだけ付ける（例: none_s1, ideal_s1_t15_d60）
     name = a.tag or (f"{a.mode}_s{a.seed}"
-                     + (f"_t{int(a.join_eta)}_d{int(a.leave_dist)}" if a.mode == "ideal" else ""))
+                     + (f"_t{int(a.join_eta)}_d{int(a.leave_dist)}" if a.mode == "ideal" else "")
+                     + ("_hf" if a.hazard_rule == "follower" else ""))
     out = os.path.join(common.OUT_DIR, name)
     os.makedirs(out, exist_ok=True)
     cfg = os.path.join(common.SCENARIO_DIR, "scenario.sumocfg")
@@ -140,8 +150,7 @@ def main():
         cmd += ["--fcd-output", os.path.join(out, "fcd.xml"), "--fcd-output.acceleration", "true"]
     traci.start(cmd)
 
-    with open(os.path.join(common.SCENARIO_DIR, "hazards.json"), encoding="utf-8") as f:
-        hazards = json.load(f)
+    hazards = hazard_eval.load_hazards(a.hazard_rule)
     jids = common.read_sim_edge_servers()           # {intersectionId: junctionId}
     junctions = {iid: traci.junction.getPosition(j) for iid, j in jids.items()}
     routes = RouteIndex(traci, common.load_net(), jids)
@@ -151,6 +160,8 @@ def main():
     hf = open(os.path.join(out, "hazard_log.csv"), "w", newline="", encoding="utf-8")
     hw = csv.writer(hf); hw.writerow(["t", "intersectionId", "hazard_vehicle", "event", "target", "detail"])
     groups = Groups(traci, junctions, routes, gw)
+    followers = hazard_eval.FollowerTracker(traci, os.path.join(out, "followers.csv"))
+    last_stop = {}   # 交差点 → 最後に急停止させた時刻（--hazard-rule follower）
 
     active = []      # [{veh, until, iid}]
     pending = []     # 通知の遅延キュー [(deliver_t, hazard)]
@@ -164,6 +175,7 @@ def main():
             groups.update(now)
 
         # 急停止イベントの発生（指定車両が交差点の手前 trigger_m に来たら）
+        alive = set(traci.vehicle.getIDList())
         for h in hazards:
             if h.get("done"):
                 continue
@@ -182,10 +194,16 @@ def main():
             spd = traci.vehicle.getSpeed(v)
             if d > h["trigger_m"] or spd < 3.0:
                 continue
+            if a.hazard_rule == "follower":
+                if (now - last_stop.get(h["intersectionId"], -1e9) < hazard_eval.SAME_ES_INTERVAL
+                        or not hazard_eval.follower_exists(traci, v, alive)):
+                    continue               # 後続車が現れるのを待つ（交差点を過ぎたら SKIP_PASSED）
+                last_stop[h["intersectionId"]] = now
             h["done"] = True
             traci.vehicle.setDecel(v, h["decel"])
             traci.vehicle.slowDown(v, 0.0, max(spd / h["decel"], 0.5))
-            active.append({"veh": v, "until": now + h["stop_sec"] + spd / h["decel"], "iid": h["intersectionId"]})
+            active.append({"veh": v, "until": now + h["stop_sec"] + spd / h["decel"], "iid": h["intersectionId"],
+                           "t0": now})
             hw.writerow([f"{now:.1f}", h["intersectionId"], v, "SUDDEN_STOP", "", f"speed={spd:.1f},dist={d:.1f}"])
             if a.mode == "ideal":
                 pending.append((now + a.latency, {"veh": v, "iid": h["intersectionId"],
@@ -203,44 +221,46 @@ def main():
             else:
                 traci.vehicle.setSpeed(h["veh"], 0.0)
 
-        # 理想V2V: 同じ交差点グループの後続車へ通知 → DECELERATE
+        # 理想V2V: 急停止した車と同じ交差点グループにいる後続車へ通知 → DECELERATE
+        # 本システムと同じく，止まっている間は送り続ける（後からグループに入った車にも届く）
         for item in list(pending):
             t_deliver, h = item
             if now < t_deliver:
                 continue
-            pending.remove(item)
             hv = h["veh"]
-            if hv not in traci.vehicle.getIDList():
+            if hv not in alive or now >= h["until"]:
+                pending.remove(item)
                 continue
             h_edge, h_pos = traci.vehicle.getRoadID(hv), traci.vehicle.getLanePosition(hv)
-            for m in groups.members[h["iid"]]:
-                if m == hv or m not in traci.vehicle.getIDList():
+            shared = set().union(*[mem for mem in groups.members.values() if hv in mem])
+            for m in shared:
+                if m == hv or m not in alive:
                     continue
-                d = traci.vehicle.getDrivingDistance(m, h_edge, h_pos)
-                if d is None or d <= 0 or d > 1e6:
+                d = hazard_eval.gap_behind(traci, m, h_edge, h_pos, 400.0)
+                if d is None:
                     continue            # 後続ではない（前方・対向・別ルート）
-                # 希望速度（上限）を下げる。減速そのものは車両モデル（IDM）が安全に行うため，
-                # 通知によって後続車との安全距離が崩れることはない（TraCIで速度を直接指定すると崩れる）
-                # 一気に下げるとIDMが急ブレーキをかけるため，2 m/s^2 相当で段階的に下げる（下の保持処理）
+                # 速度の上限を下げる。車間は車両モデル（IDM）が保つので追突はしない
+                # （TraCIで速度を直接指定すると車間が保たれず追突する）。下げ方は hazard_eval.slow_down_step
                 if m not in warned:
-                    warned[m] = {"until": h["until"], "orig": traci.vehicle.getMaxSpeed(m),
-                                 "cur": max(traci.vehicle.getSpeed(m), a.warn_speed)}
+                    warned[m] = {"until": h["until"], "orig": traci.vehicle.getMaxSpeed(m)}
+                    hw.writerow([f"{now:.1f}", h["iid"], hv, "DECELERATE", m, f"gap={d:.1f}"])
                 else:
                     warned[m]["until"] = max(warned[m]["until"], h["until"])
-                hw.writerow([f"{now:.1f}", h["iid"], hv, "DECELERATE", m, f"gap={d:.1f}"])
 
         for m, w in list(warned.items()):
             if m not in traci.vehicle.getIDList():
                 del warned[m]; continue
             if now < w["until"]:
-                w["cur"] = max(a.warn_speed, w["cur"] - 2.0 * step_len)
-                traci.vehicle.setMaxSpeed(m, w["cur"])
+                hazard_eval.slow_down_step(traci, m, a.warn_speed, step_len)
             else:
                 traci.vehicle.setMaxSpeed(m, w["orig"])
                 del warned[m]
                 hw.writerow([f"{now:.1f}", "", "", "RESUME", m, ""])
 
+        followers.step(now, active, warned, alive)
+
     traci.close()
+    followers.close()
     gf.close(); hf.close()
     print(f"完了: {out}")
 

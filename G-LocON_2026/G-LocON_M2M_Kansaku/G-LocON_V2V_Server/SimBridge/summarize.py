@@ -13,6 +13,14 @@
     junction_col   交差点内の接触件数（SUMOの交差点モデル由来のものを含むため参考値）
     *_hz           急停止の発生から30秒以内に限った値（V2Vの効果が直接現れる範囲）
     mean_duration  平均所要時間 [秒]，mean_wait 平均停止時間 [秒]，fuel_l 総燃料 [L]
+
+  急停止した車に後ろから近づいた車（followers.csv。通信とは無関係に SUMO の正解から拾う）だけを見た指標:
+    followers      急停止した車の後ろ 150m 以内に近づいた車の数（のべ。急停止が終わる 3秒前より後に来た車は除く）
+    foll_warned    そのうち減速指示が届いた車の数，coverage はその割合 [%]
+    warn_gap       減速指示が届いた時点の，急停止した車までの道のり（中央値）[m]
+    warn_lead      同じ時点の「道のり ÷ 速度」（中央値）[秒]。大きいほど余裕を持って届いている
+    foll_decel     近づいた車の最大減速度の平均 [m/s^2]，foll_hard はそれが 4.5 を超えた車の数
+    foll_v_near    急停止した車の 30m 手前まで来たときの速度の平均 [m/s]（その前に急停止が終わった車は除く）
 """
 import csv
 import os
@@ -20,6 +28,7 @@ import sys
 import xml.etree.ElementTree as ET
 
 import common
+import hazard_eval
 
 HAZARD_WINDOW = 30.0
 HARD_BRAKE = -4.0   # 快適な減速度(3.0)を明確に超える減速
@@ -111,6 +120,31 @@ def collisions(path):
     return rear, junc
 
 
+def median(xs):
+    xs = sorted(xs)
+    return round(xs[len(xs) // 2], 1) if xs else None
+
+
+def follower_stats(path):
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding="utf-8") as f:
+        rows = [r for r in csv.DictReader(f) if float(r["time_left"]) >= hazard_eval.MIN_TIME_LEFT]
+    if not rows:
+        return {"followers": 0}
+    w = [r for r in rows if r["warned"] == "1"]
+    dec = [float(r["max_decel"]) for r in rows]
+    near = [float(r["speed_near"]) for r in rows if r["speed_near"]]
+    return {"followers": len(rows), "foll_warned": len(w), "coverage": round(100 * len(w) / len(rows), 1),
+            "warn_gap": median([float(r["gap_warn"]) for r in w]),
+            "warn_lead": median([float(r["gap_warn"]) / max(float(r["speed_warn"]), 1.0) for r in w]),
+            "foll_decel": round(sum(dec) / len(dec), 2), "foll_hard": sum(d > 4.5 for d in dec),
+            "foll_v_near": round(sum(near) / len(near), 1) if near else None}
+
+
+FOLL_KEYS = ["followers", "foll_warned", "coverage", "warn_gap", "warn_lead", "foll_decel", "foll_hard", "foll_v_near"]
+
+
 def summarize(name):
     d = os.path.join(common.OUT_DIR, name)
     warned, stop_times = 0, []
@@ -126,7 +160,9 @@ def summarize(name):
     hb, hbv, hb_hz = fcd_stats(os.path.join(d, "fcd.xml"), stop_times)
     n, dur, wait, fuel = trip_stats(os.path.join(d, "tripinfo.xml"))
     col = collisions(os.path.join(d, "collisions.xml"))
+    fs = follower_stats(os.path.join(d, "followers.csv"))
     return {"run": name, "vehicles": n, "sudden_stops": stops, "warned": warned,
+            **{k: fs.get(k) for k in FOLL_KEYS},
             "near_miss": near, "near_miss_hz": near_hz, "min_ttc": None if min_ttc is None else round(min_ttc, 2),
             "drac_over3": drac3, "hard_brake": hb, "hard_brake_hz": hb_hz, "hard_brake_veh": hbv,
             "rear_end": col[0], "junction_col": col[1],

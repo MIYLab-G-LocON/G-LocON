@@ -5,7 +5,8 @@
 作るもの（scenario/）:
     vtypes.add.xml    車両モデル
     trips.rou.xml     エリア内のランダムな出発地→目的地（全車両が自由に走行）
-    hazards.json      急停止イベント（エッジサーバ交差点を通る車が，その手前で急停止）
+    hazards.json      急停止イベント（エッジサーバ交差点を通る車から選んだ 40 台が，その手前で急停止）
+    hazard_candidates.json  急停止の候補（エッジサーバ交差点を通る車すべて。--hazard-rule follower で使う）
     scenario.sumocfg  SUMO設定
 
 車両モデルは IDM（快適な減速度 3.0 m/s^2 を超える減速は危険時のみ起きる）とし，
@@ -82,6 +83,13 @@ def main():
                for v, iid, j in sorted(picked, key=lambda t: int(t[0][1:]))]
     with open(os.path.join(common.SCENARIO_DIR, "hazards.json"), "w", encoding="utf-8") as f:
         json.dump(hazards, f, ensure_ascii=False, indent=1)
+    # --hazard-rule follower 用: エッジサーバ交差点を通る車すべてを候補にし，実行時に後続車がいるときだけ急停止させる
+    rng2 = random.Random(a.seed + 1000)
+    cand = [{"vehicle": v, "intersectionId": iid, "junction": j,
+             "trigger_m": rng2.choice([40, 60, 80, 100]), "stop_sec": 12, "decel": 8.0}
+            for v, iid, j in sorted(cands, key=lambda t: int(t[0][1:]))]
+    with open(os.path.join(common.SCENARIO_DIR, "hazard_candidates.json"), "w", encoding="utf-8") as f:
+        json.dump(cand, f, ensure_ascii=False, indent=1)
 
     with open(os.path.join(common.SCENARIO_DIR, "scenario.sumocfg"), "w", encoding="utf-8") as f:
         f.write(f"""<configuration>
