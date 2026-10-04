@@ -24,6 +24,7 @@ pip install -r requirements.txt      # eclipse-sumo, traci, sumolib, pyproj
 | 1ルートの長さ（中央値） | 約750 m | 約1.3 km |
 | エッジサーバ | ランダムに10か所 | 交通量の多い交差点から20か所，互いに100m以上離す（ポート 55600〜55619） |
 | 参加の条件 | ETA < τ | ETA < τ，または参加円（半径 ρ=100m）の中 |
+| 離脱円 δ | 60m | 100m |
 | 実機に割り当てる車 | 1か所以上通る車 | 3か所以上通る車（`--min-es-on-route`） |
 
 以前は1ルートが短く，グループに1回しか入らない（または1回も入らない）車が多かったため作り直した。
@@ -38,12 +39,12 @@ python make_scenario.py --trips-only   # 交通流だけ作る（エッジサー
 python select_edge_servers.py    # 交通量の多い交差点から順にエッジサーバを置く（既定: 20か所，100m以上離す）
 python make_scenario.py          # エリア内を自由に走る交通流と急停止イベントを作る
 python run_scenario.py --mode none  --seed 1
-python run_scenario.py --mode ideal --seed 1                     # τ=15秒・δ=60m（既定）→ out/ideal_s1_t15_d60
+python run_scenario.py --mode ideal --seed 1                     # τ=15秒・ρ=100m・δ=100m（既定）→ out/ideal_s1_t15_j100_d100
 python run_scenario.py --mode ideal --seed 1 --leave-dist 30     # δ を変えて比較（30 / 60 / 100）
 python run_scenario.py --mode ideal --seed 1 --join-eta 30       # τ を変えて比較（15 / 30 / 45）
 python summarize.py              # out/summary.csv に比較表
 python run_scenario.py --mode none  --hazard-rule follower       # 後続車がいるときだけ急停止させる → out/none_s1_hf
-python run_scenario.py --mode ideal --hazard-rule follower       # → out/ideal_s1_t15_d60_hf
+python run_scenario.py --mode ideal --hazard-rule follower       # → out/ideal_s1_t15_j100_d100_hf
 python run_scenario.py --mode none --gui   # 画面で確認
 ```
 
@@ -127,7 +128,7 @@ LEAVE の後の色替えは，**描かれた車の後端が離脱円を出るま
 | `--virtual-max` | 300 | 同時に動かす仮想クライアントの上限（WindowsではソケットはPython全体で約500まで） |
 | `--join-eta` | 15 | 参加タイミング τ [秒]: 交差点までのETAがこれを下回ったらJOIN（評価では 15 / 30 / 45）。実機にも `SIM_ROUTE` で同じ値を送る |
 | `--join-dist` | 100 | 参加円の半径 ρ [m]: 交差点までの直線距離がこれ未満なら ETA に関係なくJOIN（0=なし。評価では 0 / 50 / 100 / 150）。実機にも `SIM_ROUTE` で同じ値を送る |
-| `--leave-dist` | 60 | 離脱円の半径 δ [m]（評価では 30 / 60 / 100）。実機にも `SIM_ROUTE` で同じ値を送る。出力フォルダ名の末尾に `_t<τ>_j<ρ>_d<δ>` が付く |
+| `--leave-dist` | 100 | 離脱円の半径 δ [m]（評価では 30 / 60 / 100 / 150）。実機にも `SIM_ROUTE` で同じ値を送る。出力フォルダ名の末尾に `_t<τ>_j<ρ>_d<δ>` が付く |
 | `--control` | off | 車両制御．`off`=急停止なし，`none`=急停止あり・通知なし（V2Vなし），`system`=急停止の情報をグループ経由(P2P)で送り，接近中の車だけ減速させる |
 | `--hazard-rule` | fixed | 急停止の起こし方．`fixed`=決めた40台が必ず急停止，`follower`=後ろ20〜150mに後続車がいるときだけ急停止（通知の効果を見る設定。出力フォルダ名の末尾に `_hf` が付く）．`run_scenario.py` にも同じ引数がある |
 | `--min-es-on-route` | 3 | 実機に割り当てる車の条件（ルートが通るエッジサーバ交差点の数がこれ以上） |
@@ -163,7 +164,7 @@ PC上での試験結果は [実験記録（EXPERIMENTS.md）](../../EXPERIMENTS.
 | mode | 内容 | 位置づけ |
 |---|---|---|
 | `none` | V2Vなし。急停止の情報は誰にも届かない | 下限 |
-| `ideal` | 本システムと同じ規則（エッジサーバ交差点へのETA<τ（既定15秒）でJOIN，通過して δ（既定60m）離れたらLEAVE）でグループを作り，急停止を同じグループの後続車へ0.3秒後に通知する。通知を受けた車は希望速度を5 m/s まで 2 m/s² で下げ，停止解消後に戻す。通信の損失は無い | 上限（理想通信） |
+| `ideal` | 本システムと同じ規則（エッジサーバ交差点へのETA<τ（既定15秒）でJOIN，通過して δ（既定100m）離れたらLEAVE）でグループを作り，急停止を同じグループの後続車へ0.3秒後に通知する。通知を受けた車は希望速度を5 m/s まで 2 m/s² で下げ，停止解消後に戻す。通信の損失は無い | 上限（理想通信） |
 
 各車両は自分のルートが通るエッジサーバ交差点についてだけJOINする（複数の交差点に同時に参加することもある）。
 段階3以降は，ここに「実機・アプリを通した実際の通信」によるモードを加え，none・ideal と比較する。

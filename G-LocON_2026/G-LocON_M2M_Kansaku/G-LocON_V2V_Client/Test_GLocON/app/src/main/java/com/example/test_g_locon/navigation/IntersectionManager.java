@@ -21,8 +21,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
  *   参加円の半径 ρ    = 100.0 : 交差点までの直線距離がこの値未満なら，ETA に関係なくJOIN（0 = 参加円なし）
  *                                （評価では 0 / 50 / 100 / 150m を比較する。SUMOモードでは SimBridge から値を受け取る）
  *   PASS_RADIUS_M      = 20.0  : 交差点にこの距離まで近づいたら「通過済み」とする
- *   離脱円の半径 δ    = 60.0  : 通過済みで，交差点から この距離以上かつ遠ざかっていたらLEAVE
- *                                （評価では 30 / 60 / 100m を比較する。SUMOモードでは SimBridge から値を受け取る）
+ *   離脱円の半径 δ    = 100.0 : 通過済みで，交差点から この距離以上かつ遠ざかっていたらLEAVE
+ *                                （評価では 30 / 60 / 100 / 150m を比較する。SUMOモードでは SimBridge から値を受け取る）
  *
  * 通過済みの判定（PASS_RADIUS_M）は，SUMOで全車両の位置を1秒ごと（アプリと同じ間隔）に記録し，
  * 交差点に最も近づいた距離を集計して決めた（車の中心の位置で，エッジサーバ交差点312回の通過で 99% が 10.8m 以内，最大 11.4m，
@@ -44,7 +44,7 @@ public class IntersectionManager {
     private static final double MIN_SPEED_MPS     = 1.0; // ETA計算の最低速度（停止中の除算エラー防止）
 
     /** 離脱円の半径 δ の既定値 [m] */
-    public  static final double DEFAULT_LEAVE_THRESHOLD_M = 60.0;
+    public  static final double DEFAULT_LEAVE_THRESHOLD_M = 100.0;   // 2026/10/04: 60 → 100（実験記録 E9）
     /** 離脱円の半径 δ [m]。地図の離脱円（MapManager）にも使う。SUMOモードでは SimBridge の設定値に合わせる */
     private static volatile double leaveThresholdM = DEFAULT_LEAVE_THRESHOLD_M;
 
@@ -55,7 +55,7 @@ public class IntersectionManager {
     public  static final double DEFAULT_JOIN_ETA_SEC = 15.0;
     /** 評価で比べる候補（状態カードをタップして選べる） */
     public  static final double[] JOIN_ETA_CANDIDATES_SEC = {15.0, 30.0, 45.0};
-    public  static final double[] LEAVE_CANDIDATES_M      = {30.0, 60.0, 100.0};
+    public  static final double[] LEAVE_CANDIDATES_M      = {30.0, 60.0, 100.0, 150.0};
     private static volatile double joinEtaSec = DEFAULT_JOIN_ETA_SEC;
 
     public static double getJoinEtaSec() { return joinEtaSec; }

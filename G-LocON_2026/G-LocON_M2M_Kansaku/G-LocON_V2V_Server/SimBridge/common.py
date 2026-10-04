@@ -28,8 +28,8 @@ JOIN_ETA_SEC = 15.0      # τ（参加タイミング）: ETAがこれを下回�
 JOIN_DIST_M = 100.0      # ρ（参加円の半径）: 交差点までの直線距離がこれ未満なら，ETA に関係なくJOIN（0 = 参加円なし）
                          # 渋滞でゆっくり進む車は ETA が大きく，交差点のすぐ手前でも参加しないため（2026/10/04 追加）
                          # 評価では 0 / 50 / 100 / 150m を比較する（--join-dist）
-LEAVE_DIST_M = 60.0      # δ（離脱円の半径）: 通過後，交差点からこれ以上離れ，かつ遠ざかっていればLEAVE
-                         # 評価では 30 / 60 / 100m を比較する（sim_bridge.py・run_scenario.py の --leave-dist）
+LEAVE_DIST_M = 100.0     # δ（離脱円の半径）: 通過後，交差点からこれ以上離れ，かつ遠ざかっていればLEAVE（2026/10/04: 60 → 100）
+                         # 評価では 30 / 60 / 100 / 150m を比較する（sim_bridge.py・run_scenario.py の --leave-dist）
 
 
 def sumo_home():

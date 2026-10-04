@@ -15,7 +15,8 @@
                     同じ交差点グループの車どうしがつながる
     eta_t<τ>_d<δ>_j<ρ>  上に加えて，交差点までの直線距離が ρ 未満（参加円の中）なら ETA に関係なく参加（今の既定は ρ=100）
                     （渋滞でゆっくり進む車は ETA が大きくなり，交差点のすぐ手前にいても参加しないため）
-    dist_r<R>       従来G-LocON: 各車が T 秒ごと（既定5秒）にサーバへ問い合わせ，半径 R 以内の車とつながる
+    dist_r<R>       従来G-LocON: 各車が T 秒ごとにサーバへ問い合わせ，半径 R 以内の車とつながる。
+                    元のアプリ（G-LocON_2024 の MainActivity）は searchRange=100m，位置の更新2回ごと（約2秒）に問い合わせる
 
 出力 out/compare_<tag>/:
     schemes.csv   方式ごとの指標（下記）
@@ -34,11 +35,18 @@
         交差点で出会った2台（同じ交差点を 5秒以内に続けて通った2台）について，
         先の車が着いた時点でつながっていた割合，3秒以上前からつながっていた割合，つながってからの時間（中央値）。
         _es はエッジサーバのある交差点だけ，_all はエリア内の全交差点
-    pairs / reconnect_pct / conn_per_pair
-        一度でもつながった2台の組の数，そのうち2回以上つながり直した組の割合，1組あたりの接続回数
-    short_pct               10秒以下で切れた接続の割合
     noshare_pct             ルートが1か所も交わらない相手との接続の割合（別の道を走っていて近くを通っただけの相手）
-    far_pct                 接続の間に一度も 50m 以内に近づかなかった接続の割合（近くをかすめただけの相手など）
+    far_pct                 接続の間に一度も 50m 以内に近づかなかった接続の割合
+    wasted_pct / wasted_per_veh_min
+        無駄な接続: ルートが交わらない，または一度も 50m 以内に近づかなかった接続の割合と，1台1分あたりの回数。
+        （交わらない道で 50m 以内を並走しただけの相手も無駄に数える）
+    short_pct               10秒以下で切れた接続の割合
+    pairs / reconnect_pct   一度でもつながった2台の組の数，そのうち2回以上つながり直した組の割合
+    reconn_per_veh_min      つなぎ直し（同じ2台の2回目以降の接続）の回数（1台1分あたり）
+    reconn_quick_pct        つなぎ直しのうち，切れてから10秒以内につながり直したもの（境目での出入りなど）
+    reconn_near_pct         つなぎ直しのうち，切れている間も 50m 以内にいたもの（近くにいるのに切れていた）
+    reconn_wasted_pct       つなぎ直しのうち，つなぎ直した後の接続が無駄だったもの
+    reconn_gap_median       切れてからつながり直すまでの時間（中央値）
     enc_n / enc_connected / enc_lead3 / enc_lead_median
         すれ違った2台（距離が初めて 30m 未満になった2台。交差点かどうかに関係なく位置だけで決める）について，
         その時点でつながっていた割合，3秒以上前からつながっていた割合，つながってからの時間（中央値）。
@@ -84,8 +92,9 @@ class Scheme:
         self.tp = self.conn_n = self.rel_n = 0
         self.noshare = 0
         self.pair_times = {}        # (a,b) -> その2台がつながった回数（つなぎ直しの数え上げ）
-        self.mind = {}              # (a,b) -> 今の接続の間に最も近づいた距離
-        self.ended = []             # 終わった接続 [(続いた秒数, 最も近づいた距離)]
+        self.cur = {}               # (a,b) -> 今の接続の記録 {k: 何回目, mind: 最も近づいた距離, noshare, gap, gap_mind}
+        self.gap = {}               # (a,b) -> [前の接続が切れた時刻, 切れている間に最も近づいた距離]
+        self.ended = []             # 終わった接続の記録（上に dur: 続いた秒数 を足したもの）
         self.enc = []               # すれ違い [(近づく速さ, 何秒前からつながっていたか or None)]
 
     def connected(self):
@@ -97,23 +106,44 @@ class Scheme:
 
     def account(self, now, alive, relevant, xy, nodes):
         cur = self.connected()
+
+        def dist(p):
+            a, b = p
+            if a in xy and b in xy:
+                return math.hypot(xy[a][0] - xy[b][0], xy[a][1] - xy[b][1])
+            return None
+
+        # 切れている間（前の接続が終わってから）の最も近づいた距離
+        for p in list(self.gap):
+            if p in cur:
+                continue
+            d = dist(p)
+            if d is None:
+                del self.gap[p]            # どちらかが走り終えた
+            elif d < self.gap[p][1]:
+                self.gap[p][1] = d
         for p in cur:
             if p not in self.since:
                 self.since[p] = now
                 self.setups += 1
-                self.pair_times[p] = self.pair_times.get(p, 0) + 1
-                self.mind[p] = 1e9
-                if p[0] in nodes and p[1] in nodes and not (nodes[p[0]] & nodes[p[1]]):
+                k = self.pair_times[p] = self.pair_times.get(p, 0) + 1
+                noshare = p[0] in nodes and p[1] in nodes and not (nodes[p[0]] & nodes[p[1]])
+                if noshare:
                     self.noshare += 1       # ルートが1か所も交わらない相手との接続
-            a, b = p
-            if a in xy and b in xy:
-                d = math.hypot(xy[a][0] - xy[b][0], xy[a][1] - xy[b][1])
-                if d < self.mind[p]:
-                    self.mind[p] = d
+                g = self.gap.pop(p, None)
+                self.cur[p] = {"k": k, "mind": 1e9, "noshare": noshare,
+                               "gap": None if g is None else now - g[0],
+                               "gap_mind": None if g is None else g[1]}
+            d = dist(p)
+            if d is not None and d < self.cur[p]["mind"]:
+                self.cur[p]["mind"] = d
         for p in [p for p in self.since if p not in cur]:
             dur = now - self.since.pop(p)
             self.durations.append(dur)
-            self.ended.append((dur, self.mind.pop(p, 1e9)))
+            c = self.cur.pop(p)
+            c["dur"] = dur
+            self.ended.append(c)
+            self.gap[p] = [now, 1e9]
         for v in alive:
             self.peer_counts.append(len(self.peers.get(v, ())))
         self.conn_n += len(cur)
@@ -300,13 +330,15 @@ def main():
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--tag", default="")
     ap.add_argument("--taus", default="15,30,45", help="本システムの τ [秒]（カンマ区切り）")
-    ap.add_argument("--deltas", default="60", help="本システムの δ [m]（カンマ区切り）")
+    ap.add_argument("--deltas", default="100", help="本システムの δ [m]（カンマ区切り）")
     ap.add_argument("--join-dists", default="100",
                     help="本システムの参加円の半径 ρ [m]（0=なし。カンマ区切り。既定は100）")
     ap.add_argument("--etas", default="",
                     help="本システムの条件を τ:ρ:δ の組で指定（例 15:100:60,30:100:60）。指定すると --taus などは使わない")
-    ap.add_argument("--radii", default="100,200,300", help="従来G-LocONの検索半径 [m]（カンマ区切り。アプリの既定は200）")
-    ap.add_argument("--search-period", type=float, default=5.0, help="従来G-LocONの問い合わせ間隔 [秒]（アプリの既定は5）")
+    ap.add_argument("--radii", default="100,150,200,300",
+                    help="従来G-LocONの検索半径 [m]（カンマ区切り。元のアプリ G-LocON_2024 の既定は100）")
+    ap.add_argument("--search-period", type=float, default=2.0,
+                    help="従来G-LocONの問い合わせ間隔 [秒]。元のアプリ（G-LocON_2024）は位置の更新2回ごと（約2秒）")
     ap.add_argument("--no-hazards", action="store_true", help="急停止を起こさない")
     ap.add_argument("--period", type=float, default=None, help="車両の発生間隔 [秒]（指定すると交通流をその場で作る）")
     ap.add_argument("--trip-seed", type=int, default=1, help="交通流（出発地・目的地）の乱数")
@@ -553,15 +585,33 @@ def main():
                 res[f"met_connected_{scope}"] = round(100 * con / max(n, 1), 1)
                 res[f"met_lead3_{scope}"] = round(100 * ok / max(n, 1), 1)
                 res[f"met_lead_median_{scope}"] = leads[len(leads) // 2] if leads else None
-        # つなぎ直し・短い接続・近づかないまま終わった接続
-        ended = sc.ended + [(end_t - t0, sc.mind.get(p, 1e9)) for p, t0 in sc.since.items()]
+        # 無駄な接続・つなぎ直し・短い接続
+        ended = list(sc.ended)
+        for p, t0 in sc.since.items():
+            c = dict(sc.cur[p]); c["dur"] = end_t - t0
+            ended.append(c)
+        n_end = max(len(ended), 1)
         npairs = max(len(sc.pair_times), 1)
+
+        def wasted(c):      # ルートが交わらない，または一度も FAR_M 以内に近づかなかった
+            return c["noshare"] or c["mind"] > FAR_M
+
         res["pairs"] = len(sc.pair_times)
+        res["noshare_pct"] = round(100 * sum(1 for c in ended if c["noshare"]) / n_end, 1)
+        res["far_pct"] = round(100 * sum(1 for c in ended if c["mind"] > FAR_M) / n_end, 1)
+        res["wasted_pct"] = round(100 * sum(1 for c in ended if wasted(c)) / n_end, 1)
+        res["wasted_per_veh_min"] = round(2 * sum(1 for c in ended if wasted(c)) / max(veh_seconds, 1) * 60, 2)
+        res["short_pct"] = round(100 * sum(1 for c in ended if c["dur"] <= SHORT_SEC) / n_end, 1)
+        # つなぎ直し（同じ2台の2回目以降の接続）を性質で分ける
+        re = [c for c in ended if c["k"] >= 2 and c["gap"] is not None]
+        n_re = max(len(re), 1)
         res["reconnect_pct"] = round(100 * sum(1 for n in sc.pair_times.values() if n >= 2) / npairs, 1)
-        res["conn_per_pair"] = round(sum(sc.pair_times.values()) / npairs, 2)
-        res["short_pct"] = round(100 * sum(1 for d, _ in ended if d <= SHORT_SEC) / max(len(ended), 1), 1)
-        res["noshare_pct"] = round(100 * sc.noshare / max(sc.setups, 1), 1)
-        res["far_pct"] = round(100 * sum(1 for _, m in ended if m > FAR_M) / max(len(ended), 1), 1)
+        res["reconn_per_veh_min"] = round(2 * len(re) / max(veh_seconds, 1) * 60, 2)
+        res["reconn_quick_pct"] = round(100 * sum(1 for c in re if c["gap"] <= SHORT_SEC) / n_re, 1)
+        res["reconn_near_pct"] = round(100 * sum(1 for c in re if c["gap_mind"] <= FAR_M) / n_re, 1)
+        res["reconn_wasted_pct"] = round(100 * sum(1 for c in re if wasted(c)) / n_re, 1)
+        gaps_re = sorted(c["gap"] for c in re)
+        res["reconn_gap_median"] = gaps_re[len(gaps_re) // 2] if gaps_re else None
         # すれ違い（距離が CLOSE_M 未満になった2台）: その時点でつながっていたか，何秒前からか
         for tag, sel in (("", lambda c: True), ("_fast", lambda c: c >= FAST_CLOSING)):
             e = [(c, l) for c, l in sc.enc if sel(c)]
