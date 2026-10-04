@@ -22,8 +22,8 @@ pip install -r requirements.txt      # eclipse-sumo, traci, sumolib, pyproj
 |---|---|---|
 | エリア | 1km四方 | 東西1.8km×南北1.15km（`osm/area.osm` のほぼ全体） |
 | 1ルートの長さ（中央値） | 約750 m | 約1.3 km |
-| エッジサーバ | ランダムに10か所 | 交通量の多い交差点から20か所（ポート 55600〜55619） |
-| 1ルートが通るエッジサーバ交差点 | 平均0.6か所（半数の車は0か所） | 平均4.4か所（0か所は1%） |
+| エッジサーバ | ランダムに10か所 | 交通量の多い交差点から20か所，互いに100m以上離す（ポート 55600〜55619） |
+| 参加の条件 | ETA < τ | ETA < τ，または参加円（半径 ρ=100m）の中 |
 | 実機に割り当てる車 | 1か所以上通る車 | 3か所以上通る車（`--min-es-on-route`） |
 
 以前は1ルートが短く，グループに1回しか入らない（または1回も入らない）車が多かったため作り直した。
@@ -35,7 +35,7 @@ pip install -r requirements.txt      # eclipse-sumo, traci, sumolib, pyproj
 ```
 python build_net.py              # エリア（既定: 東西1.8km×南北1.15km）を切り出し，全交差点を洗い出す
 python make_scenario.py --trips-only   # 交通流だけ作る（エッジサーバを交通量で選ぶため）
-python select_edge_servers.py    # 交通量の多い交差点から順にエッジサーバを置く（既定: 20か所，200m以上離す）
+python select_edge_servers.py    # 交通量の多い交差点から順にエッジサーバを置く（既定: 20か所，100m以上離す）
 python make_scenario.py          # エリア内を自由に走る交通流と急停止イベントを作る
 python run_scenario.py --mode none  --seed 1
 python run_scenario.py --mode ideal --seed 1                     # τ=15秒・δ=60m（既定）→ out/ideal_s1_t15_d60
@@ -55,7 +55,7 @@ python run_scenario.py --mode none --gui   # 画面で確認
 | select_edge_servers.py | `--count` | 20 | エッジサーバの数 |
 | | `--by` | traffic | 選び方．`traffic`=通る車の多い交差点から順（`trips.rou.xml` を数える），`random`=ランダム |
 | | `--seed` | 1 | 選び方の乱数（`random` のとき．変えると別の配置になる） |
-| | `--min-spacing` | 200 m | エッジサーバどうしの最小距離 |
+| | `--min-spacing` | 100 m | エッジサーバどうしの最小距離 |
 | | `--move 元=先` | なし | 選んだ交差点を別の交差点に置き換える（数・ポート・sumo-gui の色はそのまま） |
 | make_scenario.py | `--period` | 1.5 秒 | 車両の発生間隔（小さいほど交通量が多い） |
 | | `--min-distance` | 800 m | 出発地と目的地の最小距離（1ルートの長さ） |
@@ -126,7 +126,8 @@ LEAVE の後の色替えは，**描かれた車の後端が離脱円を出るま
 | `--virtual` | なし | 全車両を仮想クライアントとしてエッジサーバに参加させる |
 | `--virtual-max` | 300 | 同時に動かす仮想クライアントの上限（WindowsではソケットはPython全体で約500まで） |
 | `--join-eta` | 15 | 参加タイミング τ [秒]: 交差点までのETAがこれを下回ったらJOIN（評価では 15 / 30 / 45）。実機にも `SIM_ROUTE` で同じ値を送る |
-| `--leave-dist` | 60 | 離脱円の半径 δ [m]（評価では 30 / 60 / 100）。実機にも `SIM_ROUTE` で同じ値を送る。出力フォルダ名の末尾に `_t<τ>_d<δ>` が付く |
+| `--join-dist` | 100 | 参加円の半径 ρ [m]: 交差点までの直線距離がこれ未満なら ETA に関係なくJOIN（0=なし。評価では 0 / 50 / 100 / 150）。実機にも `SIM_ROUTE` で同じ値を送る |
+| `--leave-dist` | 60 | 離脱円の半径 δ [m]（評価では 30 / 60 / 100）。実機にも `SIM_ROUTE` で同じ値を送る。出力フォルダ名の末尾に `_t<τ>_j<ρ>_d<δ>` が付く |
 | `--control` | off | 車両制御．`off`=急停止なし，`none`=急停止あり・通知なし（V2Vなし），`system`=急停止の情報をグループ経由(P2P)で送り，接近中の車だけ減速させる |
 | `--hazard-rule` | fixed | 急停止の起こし方．`fixed`=決めた40台が必ず急停止，`follower`=後ろ20〜150mに後続車がいるときだけ急停止（通知の効果を見る設定。出力フォルダ名の末尾に `_hf` が付く）．`run_scenario.py` にも同じ引数がある |
 | `--min-es-on-route` | 3 | 実機に割り当てる車の条件（ルートが通るエッジサーバ交差点の数がこれ以上） |

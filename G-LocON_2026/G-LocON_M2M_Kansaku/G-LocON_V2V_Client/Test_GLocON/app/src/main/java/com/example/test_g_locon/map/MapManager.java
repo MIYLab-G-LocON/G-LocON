@@ -103,6 +103,8 @@ public class MapManager {
     private final Map<String, Marker> intersectionMarkers = new HashMap<>();
     /** エッジサーバ交差点の離脱円（半径 = IntersectionManager.getLeaveThresholdM()）: intersectionId → Polygon */
     private final Map<String, Polygon> leaveCircles = new HashMap<>();
+    /** エッジサーバ交差点の参加円（半径 = IntersectionManager.getJoinRadiusM()。枠線だけ）: intersectionId → Polygon */
+    private final Map<String, Polygon> joinCircles = new HashMap<>();
     /** 離脱円の中心（半径を変えたときに描き直すため） */
     private final Map<String, GeoPoint> leaveCircleCenters = new HashMap<>();
     /** 交差点マーカー色: JOIN前=グレー, JOIN中=緑 */
@@ -392,6 +394,10 @@ public class MapManager {
             }
             leaveCircles.clear();
             leaveCircleCenters.clear();
+            for (Polygon c : joinCircles.values()) {
+                mapView.getOverlays().remove(c);
+            }
+            joinCircles.clear();
 
             // ルートライン描画
             List<GeoPoint> points = new ArrayList<>();
@@ -419,6 +425,16 @@ public class MapManager {
                     mapView.getOverlays().add(c);
                     leaveCircles.put(i.getIntersectionId(), c);
                     leaveCircleCenters.put(i.getIntersectionId(), new GeoPoint(i.getLat(), i.getLng()));
+                    // 参加円（枠線だけ・青）: この円に入ると，ETA に関係なく JOIN する
+                    double jr = IntersectionManager.getJoinRadiusM();
+                    if (jr > 0) {
+                        Polygon j = new Polygon();
+                        j.setPoints(Polygon.pointsAsCircle(new GeoPoint(i.getLat(), i.getLng()), jr));
+                        styleJoinCircle(j);
+                        j.setInfoWindow(null);
+                        mapView.getOverlays().add(j);
+                        joinCircles.put(i.getIntersectionId(), j);
+                    }
                 }
             }
 
@@ -440,13 +456,27 @@ public class MapManager {
         });
     }
 
-    /** 離脱円の半径（δ）を変えたときに，今の円を新しい半径で描き直す */
+    /** 離脱円の半径（δ）・参加円の半径（ρ）を変えたときに，今の円を新しい半径で描き直す */
     public void refreshLeaveCircles() {
         uiHandler.post(() -> {
             double r = IntersectionManager.getLeaveThresholdM();
             for (Map.Entry<String, Polygon> e : leaveCircles.entrySet()) {
                 GeoPoint center = leaveCircleCenters.get(e.getKey());
                 if (center != null) e.getValue().setPoints(Polygon.pointsAsCircle(center, r));
+            }
+            // 参加円も今の半径で描き直す（0 なら消す）
+            double jr = IntersectionManager.getJoinRadiusM();
+            for (Polygon c : joinCircles.values()) mapView.getOverlays().remove(c);
+            joinCircles.clear();
+            if (jr > 0) {
+                for (Map.Entry<String, GeoPoint> e : leaveCircleCenters.entrySet()) {
+                    Polygon j = new Polygon();
+                    j.setPoints(Polygon.pointsAsCircle(e.getValue(), jr));
+                    styleJoinCircle(j);
+                    j.setInfoWindow(null);
+                    mapView.getOverlays().add(j);
+                    joinCircles.put(e.getKey(), j);
+                }
             }
             mapView.invalidate();
         });
@@ -489,6 +519,13 @@ public class MapManager {
             if (circle != null) styleLeaveCircle(circle, joined);
             mapView.invalidate();
         });
+    }
+
+    /** 参加円: 塗りなし・青い細い枠線（離脱円と見分けられるように） */
+    private void styleJoinCircle(Polygon c) {
+        c.getFillPaint().setColor(Color.TRANSPARENT);
+        c.getOutlinePaint().setColor(Color.argb(160, 0, 120, 255));
+        c.getOutlinePaint().setStrokeWidth(2f);
     }
 
     /** 離脱円の色: JOIN中は緑，それ以外は灰色（半透明の塗り＋枠線） */

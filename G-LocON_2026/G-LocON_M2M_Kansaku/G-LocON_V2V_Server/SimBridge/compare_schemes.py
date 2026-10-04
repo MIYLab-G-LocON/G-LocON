@@ -13,8 +13,8 @@
 方式:
     eta_t<τ>_d<δ>   本システム: エッジサーバ交差点への ETA < τ で参加，通過して δ 離れ遠ざかったら離脱。
                     同じ交差点グループの車どうしがつながる
-    eta_t<τ>_d<δ>_j<D>  改良案（未実装・比較のみ）: 上に加えて，交差点までの道のりが D 未満なら ETA に関係なく参加
-                    （渋滞で止まっている車は ETA が大きくなり，交差点のすぐ手前にいても参加しないため）
+    eta_t<τ>_d<δ>_j<ρ>  上に加えて，交差点までの直線距離が ρ 未満（参加円の中）なら ETA に関係なく参加（今の既定は ρ=100）
+                    （渋滞でゆっくり進む車は ETA が大きくなり，交差点のすぐ手前にいても参加しないため）
     dist_r<R>       従来G-LocON: 各車が T 秒ごと（既定5秒）にサーバへ問い合わせ，半径 R 以内の車とつながる
 
 出力 out/compare_<tag>/:
@@ -98,7 +98,7 @@ class EtaScheme(Scheme):
     def __init__(self, tau, delta, junction_xy, routes, join_dist=0.0):
         super().__init__(f"eta_t{int(tau)}_d{int(delta)}" + (f"_j{int(join_dist)}" if join_dist > 0 else ""))
         self.tau, self.delta, self.j, self.routes = tau, delta, junction_xy, routes
-        self.join_dist = join_dist      # 改良案: 交差点までの道のりがこの距離未満なら，ETA に関係なく参加する
+        self.join_dist = join_dist      # 参加円の半径 ρ: 交差点までの直線距離がこれ未満なら，ETA に関係なく参加する（0 = なし）
         self.members = {iid: set() for iid in junction_xy}
         self.prev = {}
         self.asked = set()
@@ -127,7 +127,7 @@ class EtaScheme(Scheme):
                 d = self.routes.distance(v, iid)
                 if d is None:
                     continue
-                if d / max(speed[v], 1.0) < self.tau or d < self.join_dist:
+                if d / max(speed[v], 1.0) < self.tau or eu < self.join_dist:
                     self.ctrl += 2 + len(mem)  # JOIN + メンバー一覧の返信 + 既存メンバーへの参加通知
                     mem.add(v)
         self.peers = {}
@@ -272,8 +272,8 @@ def main():
     ap.add_argument("--tag", default="")
     ap.add_argument("--taus", default="15,30,45", help="本システムの τ [秒]（カンマ区切り）")
     ap.add_argument("--deltas", default="60", help="本システムの δ [m]（カンマ区切り）")
-    ap.add_argument("--join-dists", default="0",
-                    help="改良案: 交差点までの道のりがこの距離 [m] 未満なら ETA に関係なく参加（0=なし。カンマ区切り）")
+    ap.add_argument("--join-dists", default="100",
+                    help="本システムの参加円の半径 ρ [m]（0=なし。カンマ区切り。既定は100）")
     ap.add_argument("--radii", default="100,200,300", help="従来G-LocONの検索半径 [m]（カンマ区切り。アプリの既定は200）")
     ap.add_argument("--search-period", type=float, default=5.0, help="従来G-LocONの問い合わせ間隔 [秒]（アプリの既定は5）")
     ap.add_argument("--no-hazards", action="store_true", help="急停止を起こさない")

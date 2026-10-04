@@ -18,6 +18,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * パラメータ:
  *   参加タイミング τ  = 15.0  : ETA がこの値を下回ったらJOIN
  *                                （評価では 15 / 30 / 45秒を比較する。SUMOモードでは SimBridge から値を受け取る）
+ *   参加円の半径 ρ    = 100.0 : 交差点までの直線距離がこの値未満なら，ETA に関係なくJOIN（0 = 参加円なし）
+ *                                （評価では 0 / 50 / 100 / 150m を比較する。SUMOモードでは SimBridge から値を受け取る）
  *   PASS_RADIUS_M      = 20.0  : 交差点にこの距離まで近づいたら「通過済み」とする
  *   離脱円の半径 δ    = 60.0  : 通過済みで，交差点から この距離以上かつ遠ざかっていたらLEAVE
  *                                （評価では 30 / 60 / 100m を比較する。SUMOモードでは SimBridge から値を受け取る）
@@ -58,6 +60,17 @@ public class IntersectionManager {
 
     public static double getJoinEtaSec() { return joinEtaSec; }
     public static void setJoinEtaSec(double s) { if (s > 0) joinEtaSec = s; }
+
+    /**
+     * 参加円の半径 ρ の既定値 [m]: 交差点までの直線距離がこれ未満なら，ETA に関係なく JOIN する（0 = 参加円なし）。
+     * 渋滞でゆっくり進む車は ETA が大きくなり，交差点のすぐ手前にいても参加しないため（2026/10/04 追加）。
+     */
+    public  static final double DEFAULT_JOIN_RADIUS_M = 100.0;
+    public  static final double[] JOIN_RADIUS_CANDIDATES_M = {0.0, 50.0, 100.0, 150.0};
+    private static volatile double joinRadiusM = DEFAULT_JOIN_RADIUS_M;
+
+    public static double getJoinRadiusM() { return joinRadiusM; }
+    public static void setJoinRadiusM(double m) { if (m >= 0) joinRadiusM = m; }
 
     private final List<Intersection> intersections = new CopyOnWriteArrayList<>();
     private final HubenyDistance hubeny = new HubenyDistance();
@@ -137,8 +150,8 @@ public class IntersectionManager {
 
             if (!intersection.isJoined() && !intersection.hasJoinedAndLeft()
                     && intersection.hasEdgeServer()) {
-                // JOIN判定: ETA < τ
-                if (eta < joinEtaSec) {
+                // JOIN判定: ETA < τ，または参加円（半径 ρ）の中
+                if (eta < joinEtaSec || dist < joinRadiusM) {
                     intersection.setJoined(true);
                     logJoin(intersection, now, "JOIN");
                     if (callback != null) callback.onShouldJoin(intersection);

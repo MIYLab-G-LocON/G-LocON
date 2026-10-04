@@ -163,6 +163,7 @@ public class SimBridgeClient implements Runnable {
                 // 離脱円の半径は SimBridge の設定に合わせる（仮想クライアントと同じ条件で比較するため）
                 if (m.has("leaveDist")) IntersectionManager.setLeaveThresholdM(m.getDouble("leaveDist"));
                 if (m.has("joinEta")) IntersectionManager.setJoinEtaSec(m.getDouble("joinEta"));
+                if (m.has("joinDist")) IntersectionManager.setJoinRadiusM(m.getDouble("joinDist"));
                 // 道の形（地図のルート線用）: [[緯度, 経度], ...]
                 lastRouteShape = null;
                 if (m.has("shape")) {

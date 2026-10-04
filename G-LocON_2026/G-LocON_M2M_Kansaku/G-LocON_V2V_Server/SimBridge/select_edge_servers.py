@@ -1,12 +1,16 @@
 """段階1-b: エリア内の交差点からエッジサーバを置く交差点を選ぶ.
 
-    python select_edge_servers.py [--count 20] [--by traffic] [--min-spacing 200]
+    python select_edge_servers.py [--count 20] [--by traffic] [--min-spacing 100]
     python select_edge_servers.py --by random --seed 1      # ランダムに選ぶ
 
 --by traffic（既定）: 交通量の多い交差点から順に選ぶ（scenario/trips.rou.xml で，その交差点を通る車の数を数える。
                       先に make_scenario.py --trips-only を実行しておく）。
                       ランダムに選ぶと車の通らない交差点にも置かれ，1ルートで1回もグループに入らない車が多くなるため。
 --by random         : ランダムに選ぶ
+
+2026/10/04: 最小距離の既定を 200m → 100m にした。交通量の多い交差点は幹線道路沿いに固まっており，
+200m 離す条件だとその多くを飛ばしてしまう（実験記録 E6）。どこに置くのが良いかは別の研究課題とし，
+現段階では方式の挙動を確かめやすい配置（交通量の多い交差点に詰めて置く）を使う。
 
 --move 元=先 : ランダムに選んだ交差点を別の交差点に置き換える（数・ポート・色はそのまま）
 
@@ -27,7 +31,7 @@ def main():
     ap.add_argument("--count", type=int, default=20, help="エッジサーバの数")
     ap.add_argument("--by", choices=["traffic", "random"], default="traffic", help="選び方")
     ap.add_argument("--seed", type=int, default=1, help="選び方の乱数シード")
-    ap.add_argument("--min-spacing", type=float, default=200.0,
+    ap.add_argument("--min-spacing", type=float, default=100.0,
                     help="エッジサーバどうしの最小距離 [m]（近すぎる交差点を同時に選ばない）")
     ap.add_argument("--min-degree", type=int, default=3, help="この本数以上の道がつながる交差点から選ぶ")
     ap.add_argument("--move", action="append", default=[], metavar="元ID=先ID",

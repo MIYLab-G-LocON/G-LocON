@@ -6,7 +6,7 @@
 
 mode:
     none  : V2Vなし（下限）。急停止の情報は誰にも届かない
-    ideal : 理想V2V（上限）。本システムと同じ規則（ETA<τでJOIN，通過してδ離れたらLEAVE）で
+    ideal : 理想V2V（上限）。本システムと同じ規則（ETA<τ または参加円の中でJOIN，通過してδ離れたらLEAVE）で
             交差点グループを作り，急停止が起きたら同じグループの後続車（400m以内）へ latency 秒後から通知し続け，
             後続車は希望速度を warn-speed に下げて減速（DECELERATE）し，解消後に復帰（RESUME）する。
             通信の損失・遅延のばらつきは無い。実機・アプリをつないだ実験（段階3以降）の比較対象になる。
@@ -46,6 +46,7 @@ def parse():
                     help="急停止の起こし方（follower=後続車がいるときだけ）")
     ap.add_argument("--leave-dist", type=float, default=common.LEAVE_DIST_M, help="離脱円の半径 δ [m]")
     ap.add_argument("--join-eta", type=float, default=common.JOIN_ETA_SEC, help="参加タイミング τ [秒]")
+    ap.add_argument("--join-dist", type=float, default=common.JOIN_DIST_M, help="参加円の半径 ρ [m]（0 = なし）")
     return ap.parse_args()
 
 
@@ -118,7 +119,7 @@ class Groups:
                 if d is None:
                     continue           # この交差点を通らない（または通過済み）
                 eta = d / max(t.vehicle.getSpeed(v), 1.0)
-                if eta < common.JOIN_ETA_SEC:
+                if eta < common.JOIN_ETA_SEC or eu < common.JOIN_DIST_M:
                     mem.add(v)
                     self.logw.writerow([f"{now:.1f}", iid, v, "JOIN", f"{eta:.1f}"])
 
@@ -130,9 +131,10 @@ def main():
 
     common.LEAVE_DIST_M = a.leave_dist
     common.JOIN_ETA_SEC = a.join_eta
+    common.JOIN_DIST_M = a.join_dist
     # τ・δ はグループを作る ideal にだけ効くので，ideal の名前にだけ付ける（例: none_s1, ideal_s1_t15_d60）
     name = a.tag or (f"{a.mode}_s{a.seed}"
-                     + (f"_t{int(a.join_eta)}_d{int(a.leave_dist)}" if a.mode == "ideal" else "")
+                     + (f"_t{int(a.join_eta)}_j{int(a.join_dist)}_d{int(a.leave_dist)}" if a.mode == "ideal" else "")
                      + ("_hf" if a.hazard_rule == "follower" else ""))
     out = os.path.join(common.OUT_DIR, name)
     os.makedirs(out, exist_ok=True)

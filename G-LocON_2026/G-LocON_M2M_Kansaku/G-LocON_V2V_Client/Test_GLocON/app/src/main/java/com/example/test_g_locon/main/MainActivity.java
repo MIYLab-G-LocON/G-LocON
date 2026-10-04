@@ -540,6 +540,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         final String sub = "グループ " + joinedIds.size()
                 + " ・ つながっている車 実機" + realPeers + " / 仮想" + virtualPeers
                 + "\n参加 ETA " + Math.round(IntersectionManager.getJoinEtaSec()) + "秒前"
+                + (IntersectionManager.getJoinRadiusM() > 0
+                        ? "／" + Math.round(IntersectionManager.getJoinRadiusM()) + "m" : "")
                 + " ・ 離脱円 " + Math.round(IntersectionManager.getLeaveThresholdM()) + "m";
         runOnUiThread(() -> statusSub.setText(sub));
     }
@@ -554,9 +556,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             new MaterialAlertDialogBuilder(this)
                     .setTitle("SUMOモード中は PC 側で決めます")
                     .setMessage("今の値: 参加 τ = " + Math.round(IntersectionManager.getJoinEtaSec())
-                            + "秒，離脱円 δ = " + Math.round(IntersectionManager.getLeaveThresholdM()) + "m\n\n"
+                            + "秒，参加円 ρ = " + Math.round(IntersectionManager.getJoinRadiusM())
+                            + "m，離脱円 δ = " + Math.round(IntersectionManager.getLeaveThresholdM()) + "m\n\n"
                             + "変えるには，PC で sim_bridge.py を起動するときに\n"
-                            + "--join-eta 30 --leave-dist 100 のように指定します。\n\n"
+                            + "--join-eta 30 --join-dist 50 --leave-dist 100 のように指定します。\n\n"
                             + "スマホで選べるのは，SUMOを使わないとき（実際の位置・仮想位置・SIM）です。")
                     .setPositiveButton("閉じる", null)
                     .show();
@@ -575,6 +578,28 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 .setSingleChoiceItems(labels, now, (d, which) -> {
                     IntersectionManager.setJoinEtaSec(c[which]);
                     d.dismiss();
+                    updateStatus();
+                    showJoinRadiusDialog();
+                })
+                .setNegativeButton("閉じる", null)
+                .show();
+    }
+
+    private void showJoinRadiusDialog() {
+        final double[] c = IntersectionManager.JOIN_RADIUS_CANDIDATES_M;
+        String[] labels = new String[c.length];
+        int now = 0;
+        for (int i = 0; i < c.length; i++) {
+            labels[i] = (c[i] > 0 ? "半径 " + Math.round(c[i]) + "m に入ったら参加" : "なし（ETAだけで決める）")
+                    + (c[i] == IntersectionManager.DEFAULT_JOIN_RADIUS_M ? "（既定）" : "");
+            if (c[i] == IntersectionManager.getJoinRadiusM()) now = i;
+        }
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("参加円 ρ（青い枠線）")
+                .setSingleChoiceItems(labels, now, (d, which) -> {
+                    IntersectionManager.setJoinRadiusM(c[which]);
+                    d.dismiss();
+                    mapManager.refreshLeaveCircles();
                     updateStatus();
                     showLeaveDialog();
                 })

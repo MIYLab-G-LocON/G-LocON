@@ -15,7 +15,7 @@
                        SIM_ROUTE_REQ  {peerID}            ルートを再送してほしい
                        SIM_BYE        {peerID}            終了
     ブリッジ → スマホ  SIM_ROUTE      {vehicleId, intersections:[{intersectionId,lat,lon}], shape:[[lat,lon],...], destLat, destLon,
-                                       leaveDist, joinEta}（shape は道の形。地図のルート線用）
+                                       leaveDist, joinEta, joinDist}（shape は道の形。地図のルート線用）
                        SIM_LOCATION   {vehicleId, latitude, longitude, speed[m/s], bearing, simTime}（1秒ごと）
                        SIM_END        {vehicleId}         車が目的地に着いた（次の車が割り当てられる）
                        SIM_VEHICLES   {vehicles:[[peerID, lat, lon, bearing, 実機なら1], ...]}（1秒ごと）
@@ -316,7 +316,7 @@ class Bridge:
         x, y = self.net.getEdge(dest_edge).getToNode().getCoord()
         dlon, dlat = self.net.convertXY2LonLat(x, y)
         self.send_phone(ph, {"processType": "SIM_ROUTE", "vehicleId": ph.vid, "leaveDist": common.LEAVE_DIST_M,
-                             "joinEta": common.JOIN_ETA_SEC,
+                             "joinEta": common.JOIN_ETA_SEC, "joinDist": common.JOIN_DIST_M,
                              "intersections": [{"intersectionId": i, "lat": la, "lon": lo} for i, la, lo in seq],
                              "shape": self.route_shape(ph.vid),
                              "destLat": dlat, "destLon": dlon})
@@ -709,7 +709,7 @@ class VirtualClient:
                     it.left = True
                 continue
             if not it.joined and not it.left and it.es:
-                if eta < common.JOIN_ETA_SEC:
+                if eta < common.JOIN_ETA_SEC or it.dist < common.JOIN_DIST_M:
                     it.joined = True
                     msg = self.base("JOIN", it.iid, lat, lon)
                     msg["eta"] = eta
@@ -889,6 +889,8 @@ def main():
                     help="急停止の起こし方（follower=後ろ20〜150mに後続車がいるときだけ。run_scenario.py と同じ）")
     ap.add_argument("--warn-speed", type=float, default=5.0, help="減速指示を受けた車の目標速度 [m/s]")
     ap.add_argument("--no-fcd", action="store_true", help="--control 時に fcd.xml を出力しない（急制動の集計ができなくなる）")
+    ap.add_argument("--join-dist", type=float, default=common.JOIN_DIST_M,
+                    help="参加円の半径 ρ [m]: 交差点までの直線距離がこれ未満なら ETA に関係なくJOIN（0 = なし。評価では 0 / 50 / 100 / 150）")
     ap.add_argument("--leave-dist", type=float, default=common.LEAVE_DIST_M,
                     help="離脱円の半径 δ [m]（実機にも同じ値を送る）。評価では 30 / 60 / 100")
     ap.add_argument("--follow-phone", action="store_true",
@@ -915,9 +917,10 @@ def main():
     a.master_host, a.master_port = a.master.split(":")[0], int(a.master.split(":")[1])
     common.LEAVE_DIST_M = a.leave_dist
     common.JOIN_ETA_SEC = a.join_eta
+    common.JOIN_DIST_M = a.join_dist
     a.out = os.path.join(common.OUT_DIR, time.strftime("live_%Y%m%d_%H%M%S")
                          + (f"_{a.control}" if a.control != "off" else "")
-                         + f"_t{int(a.join_eta)}_d{int(a.leave_dist)}"
+                         + f"_t{int(a.join_eta)}_j{int(a.join_dist)}_d{int(a.leave_dist)}"
                          + ("_hf" if a.control != "off" and a.hazard_rule == "follower" else ""))
     os.makedirs(a.out, exist_ok=True)
 
@@ -960,6 +963,10 @@ def main():
             ring = [(x + common.LEAVE_DIST_M * math.cos(2 * math.pi * i / 48),
                      y + common.LEAVE_DIST_M * math.sin(2 * math.pi * i / 48)) for i in range(48)]
             traci.polygon.add(f"ES{k}_leave", ring, col, fill=False, polygonType="leaveCircle", layer=4, lineWidth=1.5)
+            if common.JOIN_DIST_M > 0:      # 参加円（半径 ρ）の輪郭。細い線
+                jring = [(x + common.JOIN_DIST_M * math.cos(2 * math.pi * i / 48),
+                          y + common.JOIN_DIST_M * math.sin(2 * math.pi * i / 48)) for i in range(48)]
+                traci.polygon.add(f"ES{k}_join", jring, col, fill=False, polygonType="joinCircle", layer=4, lineWidth=0.6)
             traci.poi.add(f"ES{k}", x, y, col, poiType="edgeServer", layer=6, width=6, height=6)
     ef = open(os.path.join(a.out, "events.csv"), "w", newline="", encoding="utf-8")
     ew = csv.writer(ef)
@@ -975,7 +982,7 @@ def main():
         br.hw = csv.writer(hf)
         br.hw.writerow(["t", "intersectionId", "hazard_vehicle", "event", "target", "detail"])
     print(f"SimBridge 起動: スマホ待ち受け {a.bind_host}:{a.bind_port}, 実機 {a.phones} 台, "
-          f"仮想クライアント {'あり' if a.virtual else 'なし'}, 参加 ETA<{a.join_eta:.0f}秒, 離脱円 {a.leave_dist:.0f} m, "
+          f"仮想クライアント {'あり' if a.virtual else 'なし'}, 参加 ETA<{a.join_eta:.0f}秒 または {a.join_dist:.0f} m 以内, 離脱円 {a.leave_dist:.0f} m, "
           f"車両制御 {a.control}, 出力 {a.out}")
     try:
         br.run()
