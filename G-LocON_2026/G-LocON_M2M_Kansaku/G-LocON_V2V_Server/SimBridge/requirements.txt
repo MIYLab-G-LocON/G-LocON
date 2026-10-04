@@ -2,3 +2,5 @@ eclipse-sumo
 traci
 sumolib
 pyproj
+matplotlib
+openpyxl

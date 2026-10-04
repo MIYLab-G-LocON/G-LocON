@@ -178,9 +178,10 @@ class Scheme:
 class EtaScheme(Scheme):
     """本システム: エッジサーバ交差点への ETA < τ で参加，通過して δ 離れ遠ざかったら離脱."""
 
-    def __init__(self, tau, delta, junction_xy, routes, join_dist=0.0):
+    def __init__(self, tau, delta, junction_xy, routes, join_dist=0.0, eta_by="line"):
         super().__init__(f"eta_t{int(tau)}_j{int(join_dist)}_d{int(delta)}")
         self.tau, self.delta, self.j, self.routes = tau, delta, junction_xy, routes
+        self.eta_by = eta_by            # ETA の距離: "line" = 直線距離（アプリ・sim_bridge.py と同じ），"route" = 道のり（E13 まで）
         self.join_dist = join_dist      # 参加円の半径 ρ: 交差点までの直線距離がこれ未満なら，ETA に関係なく参加する（0 = なし）
         self.members = {iid: set() for iid in junction_xy}
         self.prev = {}
@@ -215,7 +216,10 @@ class EtaScheme(Scheme):
                     continue
                 if d is None:
                     continue
-                d = max(d + self.dnoise.get(v, 0.0), 0.0)
+                if self.eta_by == "line":
+                    d = eu                     # 直線距離（測位誤差は eu に入っている）
+                else:
+                    d = max(d + self.dnoise.get(v, 0.0), 0.0)
                 if d / max(speed[v], 1.0) < self.tau or eu < self.join_dist:
                     self.ctrl += 2 + len(mem)  # JOIN + メンバー一覧の返信 + 既存メンバーへの参加通知
                     mem.add(v)
@@ -370,6 +374,9 @@ def main():
     ap.add_argument("--search-period", type=float, default=2.0,
                     help="従来G-LocONの問い合わせ間隔 [秒]。元のアプリ（G-LocON_2024）は位置の更新2回ごと（約2秒）")
     ap.add_argument("--no-hazards", action="store_true", help="急停止を起こさない")
+    ap.add_argument("--eta-by", choices=["line", "route"], default="line",
+                    help="本システムの ETA に使う距離。line = 直線距離（アプリと同じ。既定），route = 道のり（E13 までの計算）")
+    ap.add_argument("--gui", action="store_true", help="sumo-gui で走行を表示する（説明・確認用。遅くなる）")
     ap.add_argument("--gps-noise", type=float, default=0.0,
                     help="測位誤差の標準偏差 [m]（東西・南北それぞれ）。接続の判断だけがこの誤差つきの位置を使い，評価は正しい位置で行う")
     ap.add_argument("--gps-corr", type=float, default=0.0,
@@ -391,7 +398,12 @@ def main():
     os.makedirs(out, exist_ok=True)
     cfg = os.path.join(common.SCENARIO_DIR, "scenario.sumocfg")
     net = common.load_net()
-    cmd = [common.sumo_bin("sumo"), "-c", cfg, "--seed", str(a.seed), "--no-step-log", "true", "--no-warnings", "true"]
+    cmd = [common.sumo_bin("sumo-gui" if a.gui else "sumo"), "-c", cfg, "--seed", str(a.seed), "--no-step-log", "true", "--no-warnings", "true"]
+    if a.gui:
+        cmd += ["--start", "--quit-on-end", "--delay", "0"]
+        gs = os.path.join(common.HERE, "gui_settings.xml")
+        if os.path.exists(gs):
+            cmd += ["--gui-settings-file", gs]
     trips = os.path.join(common.SCENARIO_DIR, "trips.rou.xml")
     if a.period is not None:
         trips = make_trips(out, a.period, 900, a.min_distance, a.trip_seed, a.fringe_factor)
@@ -412,10 +424,10 @@ def main():
 
     if a.etas:
         # τ:ρ:δ の組をそのまま指定（1つずつ変える比較用）
-        schemes = [EtaScheme(float(t), float(d), junction_xy, routes, float(j))
+        schemes = [EtaScheme(float(t), float(d), junction_xy, routes, float(j), a.eta_by)
                    for t, j, d in (x.split(":") for x in a.etas.split(","))]
     else:
-        schemes = [EtaScheme(float(tau), float(dl), junction_xy, routes, float(jd))
+        schemes = [EtaScheme(float(tau), float(dl), junction_xy, routes, float(jd), a.eta_by)
                    for tau in a.taus.split(",") for dl in a.deltas.split(",") for jd in a.join_dists.split(",")]
     schemes += [DistScheme(float(r), a.search_period) for r in a.radii.split(",")]
 
@@ -629,7 +641,7 @@ def main():
         log = conn_log[sc.name]
         pc = sorted(sc.peer_counts)
         dur = sorted(sc.durations + [end_t - t0 for t0 in sc.since.values()])
-        res = {"scheme": sc.name, "gps_noise": a.gps_noise, "gps_corr": a.gps_corr, "speed_wobble": a.speed_wobble,
+        res = {"scheme": sc.name, "seed": a.seed, "trip_seed": a.trip_seed, "eta_by": a.eta_by, "gps_noise": a.gps_noise, "gps_corr": a.gps_corr, "speed_wobble": a.speed_wobble,
                "period": a.period if a.period is not None else 1.5, "es_count": len(jids),
                "vehicles": len(veh_routes), "concurrent": round(veh_seconds / max(end_t, 1)),
                "peers_mean": round(sum(pc) / max(len(pc), 1), 2),

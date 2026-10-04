@@ -2,16 +2,17 @@
 
 G-LocON V2V の評価用シミュレーション環境。設計は上位の README「6. シミュレーション設計（SUMO）」を参照。
 
-**正方形のエリア**を指定し，その中の**全交差点**から**ランダムにエッジサーバ**を選び，
+**長方形のエリア**を指定し，その中の**全交差点**から**交通量の多い順にエッジサーバ**を選び，
 エリア内を**自由に走る車両**が交差点グループを作る。
 
 - **段階1**（シナリオ作成と，V2Vなし／理想V2V のオフライン比較）: `build_net.py` → `select_edge_servers.py` → `make_scenario.py` → `run_scenario.py` → `summarize.py`
 - **段階2**（実時間でアプリ・サーバとつなぐ）: `start_servers.py` ＋ `sim_bridge.py`。モードA（実機3台）とモードB（仮想クライアント＋実機1台）
+- **方式の比較**（従来G-LocONとの比較。通信なしの計算）: `compare_schemes.py`。条件を決めて繰り返す正式評価は `eval_run.py` → `eval_report.py`（手順は [EVALUATION.md](EVALUATION.md)）
 
 ## 準備
 
 ```
-pip install -r requirements.txt      # eclipse-sumo, traci, sumolib, pyproj
+pip install -r requirements.txt      # eclipse-sumo, traci, sumolib, pyproj, matplotlib, openpyxl（最後の2つは表・グラフ用）
 ```
 
 `eclipse-sumo` はSUMO本体（sumo, sumo-gui, netconvert など）を含む。公式インストーラで入れたSUMOを使う場合は環境変数 `SUMO_HOME` を設定する。
@@ -206,21 +207,25 @@ PC上での試験結果は [実験記録（EXPERIMENTS.md）](../../EXPERIMENTS.
 通信の損失・遅延は無いものとし，実際のサーバは使わない（方式そのものの比較）。
 
 ```
-python compare_schemes.py                       # τ=15/30/45（δ=60），半径 100/200/300m → out/compare_s1/schemes.csv
-python compare_schemes.py --seed 2              # SUMOの乱数を変える（車の出発地・目的地は同じ）
-python compare_schemes.py --taus 15 --deltas 30,60,100 --radii 200 --tag s1_delta
-python compare_schemes.py --period 1.0 --es-count 20 --tag p1.0   # 交通量を変える（車の発生間隔 [秒]）
-python compare_schemes.py --es-count 40 --es-spacing 100 --tag es40   # エッジサーバの数・間隔を変える
-python compare_schemes.py --join-dists 0,100 --tag join          # 改良案: 道のり100m未満なら ETA に関係なく参加
+python compare_schemes.py --etas 15:100:100 --radii 100,150,200      # 本システム（τ:ρ:δ）と従来 100/150/200m → out/compare_s1/schemes.csv
+python compare_schemes.py --etas 15:100:100,30:100:100 --tag tau     # 本システムの条件を並べる
+python compare_schemes.py --seed 2 --trip-seed 2 --period 1.5        # 乱数を変える（--period を付けると交通流をその場で作る）
+python compare_schemes.py --period 0.75 --tag p0.75                  # 交通量を変える（車の発生間隔 [秒]）
+python compare_schemes.py --gps-noise 5 --gps-corr 10 --tag gps5     # 測位誤差 5m（10秒ほどかけて変わる）を入れる
+python compare_schemes.py --gui                                      # sumo-gui で走行を表示する（説明用）
 ```
 
-- 従来G-LocON: 各車が5秒ごとにサーバへ問い合わせ，半径 R 以内の車とつながる（アプリの既定は R=200m・5秒）。
-- 「関係のある相手」: この先10秒以内に同じ交差点に入る車，または100m以内の前後の車（どちらの方式とも無関係に SUMO から決める）。
-- 「交差点で出会った2台」: 同じ交差点を5秒以内に続けて通った2台。先の車が着く3秒以上前からつながっていた割合を見る。
+- 従来G-LocON: 各車が約2秒ごと（`--search-period`）にサーバへ問い合わせ，半径 R 以内の車とつながる。
+  元のプログラム（`G-LocON_2024`）の既定は R=100m・位置の更新2回ごと。比較では 100/150/200m を並べる。
+- 本システム: ETA（直線距離÷速度）< τ，または参加円（半径 ρ）の中で参加。通過済み（20mまで近づいた）・δ 以上離れた・遠ざかっている，で離脱。
+  アプリ・`sim_bridge.py` と同じ条件（2026/10/05 にそろえた。それ以前の結果は ETA を道のりで計算，`--eta-by route` で再現できる）。
+- 測位誤差（`--gps-noise`）: 接続の判断にだけ誤差つきの位置を使い，評価は正しい位置で行う。新旧どちらにも同じ誤差をかける。
+- 「交差点で出会った2台」: 同じ交差点を5秒以内に続けて通った2台。「判断の余裕」より前からつながっていた割合を見る（定義は上位 README 7.5）。
 - 制御メッセージの数え方（`compare_schemes.py` の `ctrl`）: 本システムは MasterServer への問い合わせ2通，JOIN 2通＋既存メンバーへの通知，
   LEAVE 1通＋残りのメンバーへの通知。従来G-LocONは問い合わせ1回2通＋新しい相手1台につき2通。
+- 出力の列の意味は `compare_schemes.py` の先頭の説明。
 
-結果と考察は [実験記録（EXPERIMENTS.md）](../../EXPERIMENTS.md) の E4〜E6 にまとめている。
+結果と考察は [実験記録（EXPERIMENTS.md）](../../EXPERIMENTS.md) の E4〜E13 にまとめている。
 
 ## 急停止の通知の評価（followers.csv）
 
