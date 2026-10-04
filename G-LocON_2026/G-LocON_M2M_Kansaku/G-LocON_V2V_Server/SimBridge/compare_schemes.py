@@ -34,7 +34,10 @@
     met_margin              交差点で出会った2台が，判断に必要な余裕より前からつながっていた割合。
         必要な余裕 = 4.1秒（国土交通省のガイドラインの，情報提供から運転者の反応まで）+ 速度 ÷ 2.0 m/s^2（止まりきるまで）
     reconn_A_per_veh_min / reconn_B_per_veh_min / reconn_A_pct
-        つなぎ直しを，切れている間の2台の距離の変化で分ける。A = 50m 未満（境目の出入り），B = 50m 以上（離れてからの再会）
+        つなぎ直しを分ける。A（境目の出入り）= 切れてから10秒以内に，2台の距離の変化が 50m 未満のままつながり直した。
+        B（離れてからの再会）= それ以外（10秒を超えて切れていた，または距離が 50m 以上変わった）
+    reconn_A_pairs / reconn_A_repeat_pct / reconn_A_max_per_pair
+        A を起こした2台の組の数，そのうち A を2回以上繰り返した組の割合，1組での最大回数
     enc_es_* / enc_es_same_* など   エッジサーバ交差点から 100m 以内で起きたすれ違いだけを取り出したもの
     met_n / met_connected / met_lead3 / met_lead_median
         交差点で出会った2台（同じ交差点を 5秒以内に続けて通った2台）について，
@@ -85,7 +88,7 @@ SHORT_SEC = 10.0            # この秒数以下で切れた接続を「短い�
 REACT_SEC = 4.1
 DECEL_INFO = 2.0
 APPROACH_WINDOW = 15.0
-FLAP_CHANGE_M = 50.0        # つなぎ直し: 切れている間の2台の距離の変化がこれ未満なら「境目の出入り」，以上なら「離れてからの再会」
+FLAP_CHANGE_M = 50.0        # つなぎ直し A（境目の出入り）: 切れてから SHORT_SEC 以内に，2台の距離の変化がこれ未満のままつながり直した
 NEAR_ES_M = 100.0           # エッジサーバ交差点からこの距離以内を「交差点の近く」とする
 LEAD_OK = 3.0               # 出会う何秒前からつながっていれば「事前につながっていた」とするか
 
@@ -147,7 +150,7 @@ class Scheme:
                 if noshare:
                     self.noshare += 1       # ルートが1か所も交わらない相手との接続
                 g = self.gap.pop(p, None)
-                self.cur[p] = {"k": k, "mind": 1e9, "noshare": noshare,
+                self.cur[p] = {"pair": p, "k": k, "mind": 1e9, "noshare": noshare,
                                "gap": None if g is None else now - g[0],
                                "gap_mind": None if g is None else g[1],
                                "gap_change": None if g is None else g[2] - g[1]}
@@ -652,10 +655,20 @@ def main():
         res["reconn_wasted_pct"] = round(100 * sum(1 for c in re if wasted(c)) / n_re, 1)
         # A: 境目の出入り（切れている間，2台の距離がほとんど変わらなかった）／ B: 離れてからの再会
         re_ab = [c for c in re if c["gap_change"] is not None]
-        nA = sum(1 for c in re_ab if c["gap_change"] < FLAP_CHANGE_M)
+        def is_a(c):    # 短い時間のうちに，位置関係がほぼ同じままつながり直した
+            return c["gap"] <= SHORT_SEC and c["gap_change"] < FLAP_CHANGE_M
+        nA = sum(1 for c in re_ab if is_a(c))
         res["reconn_A_per_veh_min"] = round(2 * nA / max(veh_seconds, 1) * 60, 2)
         res["reconn_B_per_veh_min"] = round(2 * (len(re_ab) - nA) / max(veh_seconds, 1) * 60, 2)
         res["reconn_A_pct"] = round(100 * nA / max(len(re_ab), 1), 1)
+        # 同じ2台が A を何回も繰り返したか（境目での頻繁な出入り）
+        a_by_pair = {}
+        for c in re_ab:
+            if is_a(c):
+                a_by_pair[c["pair"]] = a_by_pair.get(c["pair"], 0) + 1
+        res["reconn_A_pairs"] = len(a_by_pair)
+        res["reconn_A_repeat_pct"] = round(100 * sum(1 for n in a_by_pair.values() if n >= 2) / max(len(a_by_pair), 1), 1)
+        res["reconn_A_max_per_pair"] = max(a_by_pair.values(), default=0)
         gaps_re = sorted(c["gap"] for c in re)
         res["reconn_gap_median"] = gaps_re[len(gaps_re) // 2] if gaps_re else None
         # すれ違い（距離が CLOSE_M 未満になった2台）: その時点でつながっていたか，何秒前からか
