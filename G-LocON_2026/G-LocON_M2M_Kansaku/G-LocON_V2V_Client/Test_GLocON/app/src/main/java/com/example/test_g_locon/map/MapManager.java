@@ -29,7 +29,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * [新規] 地図表示に関するすべての操作を担うクラス。
@@ -74,8 +73,23 @@ public class MapManager {
     /** UIスレッドへのポスト用ハンドラ */
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
 
-    /** 周辺ユーザのマーカ管理リスト */
-    private final List<MarkerInfo> markerList = new ArrayList<>();
+    /**
+     * 周辺ユーザ（P2Pでつながった車）のピン: peerId → Marker。UIスレッドからだけ触る。
+     *
+     * [変更] 以前はリスト（markerList）を受信スレッドとUIスレッドの両方から触っていたため，
+     *   ・位置が続けて2回届くと同じ車のピンが2つ作られ，片方が動かないまま残る
+     *   ・グループから外れた直後に届いた位置（相手がまだ送っている分）でピンが作り直され，消えずに残る
+     * という不具合があった。1台につき1つのピンをUIスレッドだけで管理し，
+     * 「今つながっている相手」（connectedIds）に含まれない車の位置は地図に出さないようにした。
+     */
+    private final Map<String, Marker> peerMarkers = new HashMap<>();
+    /** ピンごとの最後に位置を受け取った時刻 [ms]。UIスレッドからだけ触る */
+    private final Map<String, Long> peerLastSeen = new HashMap<>();
+    /** 今つながっている相手（グループのメンバーの和集合）の peerId */
+    private volatile Set<String> connectedIds = java.util.Collections.emptySet();
+    /** この時間 位置が届かなければピンを消す（通知なしに相手がいなくなった場合の保険） */
+    private static final long PIN_TIMEOUT_MS = 10_000;
+    private static final long PIN_CHECK_MS = 2_000;
 
     /** 検索範囲を示す円ポリゴン */
 
@@ -95,11 +109,6 @@ public class MapManager {
     private static final int COLOR_INTERSECTION_DEFAULT = Color.rgb(150, 150, 150); // グレー
     private static final int COLOR_INTERSECTION_JOINED  = Color.rgb(0, 200, 80);   // 緑
 
-    /**
-     * [変更] 旧実装の waitUntilFinishAddMarker() は Thread.sleep(100) のビジーウェイトだった。
-     * AtomicBoolean に置き換えることでスピンループを排除し、スレッド安全性を向上させた。
-     */
-    private final AtomicBoolean isAddingMarker = new AtomicBoolean(false);
 
     /**
      * マーカタップ時にユーザ情報を表示するコールバック
@@ -113,7 +122,7 @@ public class MapManager {
     // ---- 他車両の表示モード（SUMOモード用） ----
     /** P2Pでつながった車（実機・仮想車両）をピンで表示 */
     public static final int DISPLAY_ALL = 0;
-    /** 実機（P2Pでつながった本物の端末）だけ表示 */
+    /** 実機だけ表示（P2Pでつながった実機はピン，つながっていない実機は青い矢印。矢印はSUMOモードのみ） */
     public static final int DISPLAY_REAL_ONLY = 1;
     /** 他車両を表示しない */
     public static final int DISPLAY_NONE = 2;
@@ -138,27 +147,38 @@ public class MapManager {
         return peerId != null && peerId.startsWith(VIRTUAL_PREFIX);
     }
 
+    /** つながっていない車の矢印を出す表示モードか */
+    private static boolean showsArrows(int mode) {
+        return mode == DISPLAY_EVERYONE || mode == DISPLAY_REAL_ONLY;
+    }
+
     private boolean isVisible(String peerId) {
         if (displayMode == DISPLAY_NONE) return false;
         if (displayMode == DISPLAY_REAL_ONLY) return !isVirtual(peerId);
         return true;
     }
 
-    /** 表示モードを切り替える。非表示になった車両のピンはすぐに消す */
+    /** 表示モードを切り替える。非表示になった車両のピン・矢印はすぐに消す */
     public void setDisplayMode(int mode) {
         displayMode = mode;
-        if (mode != DISPLAY_EVERYONE) allVehiclesOverlay.clear();
-        final List<MarkerInfo> toRemove = new ArrayList<>();
-        synchronized (markerList) {
-            for (MarkerInfo info : markerList) {
-                if (!isVisible(info.getPeerId())) toRemove.add(info);
-            }
-            markerList.removeAll(toRemove);
-        }
         uiHandler.post(() -> {
-            for (MarkerInfo info : toRemove) mapView.getOverlays().remove(info.getMarker());
+            if (!showsArrows(mode)) allVehiclesOverlay.clear();
+            removePins(id -> !isVisible(id));
             mapView.invalidate();
         });
+    }
+
+    /** 条件に合うピンを消す（UIスレッドで呼ぶ） */
+    private void removePins(java.util.function.Predicate<String> shouldRemove) {
+        java.util.Iterator<Map.Entry<String, Marker>> it = peerMarkers.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<String, Marker> e = it.next();
+            if (shouldRemove.test(e.getKey())) {
+                mapView.getOverlays().remove(e.getValue());
+                peerLastSeen.remove(e.getKey());
+                it.remove();
+            }
+        }
     }
 
     /** 仮想車両は速度に関係なく半透明の灰色，実機は速度差で赤／緑 */
@@ -172,21 +192,37 @@ public class MapManager {
         this.mapView = mapView;
         this.allVehiclesOverlay = new AllVehiclesOverlay(context.getResources().getDisplayMetrics().density);
         mapView.getOverlays().add(allVehiclesOverlay);
+        uiHandler.postDelayed(this::expirePins, PIN_CHECK_MS);
+    }
+
+    /** 位置が届かなくなった車のピンを消す（2秒ごと） */
+    private void expirePins() {
+        final long limit = System.currentTimeMillis() - PIN_TIMEOUT_MS;
+        int before = peerMarkers.size();
+        removePins(id -> {
+            Long t = peerLastSeen.get(id);
+            return t == null || t < limit;
+        });
+        if (peerMarkers.size() != before) mapView.invalidate();
+        uiHandler.postDelayed(this::expirePins, PIN_CHECK_MS);
     }
 
     /**
-     * [SUMOモード] SimBridge から届いた周りの全車両（1秒ごと）。「表示:全車両」のときだけ描く。
-     * P2Pでつながってピンが出ている車は矢印を描かない。
+     * [SUMOモード] SimBridge から届いた周りの全車両（1秒ごと）。
+     * 「全車両」では全部，「実機」では実機だけを，小さな矢印で描く。
+     * P2Pでつながってピンが出ている車は矢印を描かない（ピン = つながっている，矢印 = つながっていない）。
      */
     public void updateAllVehicles(final List<SimVehicle> vehicles) {
-        if (displayMode != DISPLAY_EVERYONE) return;
-        final Set<String> pinned = new HashSet<>();
-        synchronized (markerList) {
-            for (MarkerInfo info : markerList) pinned.add(info.getPeerId());
-        }
+        if (!showsArrows(displayMode)) return;
         uiHandler.post(() -> {
-            if (displayMode != DISPLAY_EVERYONE) return;
-            allVehiclesOverlay.setVehicles(vehicles, pinned);
+            final int mode = displayMode;
+            if (!showsArrows(mode)) return;
+            List<SimVehicle> shown = vehicles;
+            if (mode == DISPLAY_REAL_ONLY) {
+                shown = new ArrayList<>();
+                for (SimVehicle v : vehicles) if (v.isPhone) shown.add(v);
+            }
+            allVehiclesOverlay.setVehicles(shown, new HashSet<>(peerMarkers.keySet()));
             mapView.invalidate();
         });
     }
@@ -274,104 +310,57 @@ public class MapManager {
      * 既存マーカがあれば位置と色を更新、なければ新規作成する。
      *
      * 旧実装の arrangeMarker(UserInfo, ArrayList) のうち「作成・更新」部分に相当。
-     * synchronized + runOnUiThread の入れ子構造を Handler + AtomicBoolean で整理した。
+     * 位置の受信スレッドから呼ばれる。ピンの作成・移動はUIスレッドで行う。
      *
      * @param userInfo      表示するユーザ情報
      * @param mySpeed       自端末の速度 (km/h)。マーカ色の判定に使用
      */
     public void addOrUpdateMarker(final UserInfo userInfo, final double mySpeed) {
-        if (!isVisible(userInfo.getPeerId())) return;   // 表示モードで非表示の車両
+        final String peerId = userInfo.getPeerId();
+        if (peerId == null || !isVisible(peerId)) return;   // 表示モードで非表示の車両
+        // 今つながっている相手ではない車の位置は出さない
+        // （グループから外れた直後は，相手がまだこちらへ送っている位置が届くことがある）
+        if (!connectedIds.contains(peerId)) return;
         final int color = markerColor(userInfo, mySpeed);
-        // 他スレッドでマーカ追加中の場合は完了を待つ
-        // [変更] Thread.sleep(100) のビジーウェイト → AtomicBoolean で安全に待機
-        waitForMarkerReady();
-
-        // 既存マーカの更新を試みる
-        synchronized (markerList) {
-            for (int i = 0; i < markerList.size(); i++) {
-                if (markerList.get(i).getPeerId().equals(userInfo.getPeerId())) {
-                    final Marker target = markerList.get(i).getMarker();
-                    uiHandler.post(() -> {
-                        target.setPosition(
-                                new GeoPoint(userInfo.getLatitude(), userInfo.getLongitude()));
-                        target.setIcon(createColoredMarkerIcon(color));
-                        mapView.invalidate();
-                    });
-                    return;
-                }
-            }
-        }
-
-        // 既存マーカがなければ新規作成
-        isAddingMarker.set(true);
+        final GeoPoint pos = new GeoPoint(userInfo.getLatitude(), userInfo.getLongitude());
         uiHandler.post(() -> {
-            Marker marker = new Marker(mapView);
-            marker.setPosition(new GeoPoint(userInfo.getLatitude(), userInfo.getLongitude()));
-            marker.setIcon(createColoredMarkerIcon(color));
-            marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM);
-
-            // マーカタップ時のコールバック設定
-            final String peerId = userInfo.getPeerId();
-            marker.setOnMarkerClickListener((m, mv) -> {
-                if (markerTapListener != null) {
-                    markerTapListener.onMarkerTapped(peerId);
-                }
-                return true;
-            });
-
-            mapView.getOverlays().add(marker);
-            synchronized (markerList) {
-                markerList.add(new MarkerInfo(marker, peerId));
+            if (!isVisible(peerId) || !connectedIds.contains(peerId)) return;
+            Marker marker = peerMarkers.get(peerId);
+            if (marker == null) {
+                marker = new Marker(mapView);
+                marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM);
+                marker.setOnMarkerClickListener((m, mv) -> {
+                    if (markerTapListener != null) markerTapListener.onMarkerTapped(peerId);
+                    return true;
+                });
+                mapView.getOverlays().add(marker);
+                peerMarkers.put(peerId, marker);
+                Log.d(TAG, "マーカ追加: peerId=" + peerId);
             }
-            isAddingMarker.set(false);
+            marker.setPosition(pos);
+            marker.setIcon(createColoredMarkerIcon(color));
+            peerLastSeen.put(peerId, System.currentTimeMillis());
             mapView.invalidate();
-
-            Log.d(TAG, "マーカ追加: peerId=" + peerId);
         });
     }
 
     /**
-     * 周辺ユーザ一覧と現在のマーカリストを比較し、不要なマーカを削除する。
+     * 今つながっている相手の一覧を受け取り，一覧に無い車のピンを消す。
      * 旧実装の arrangeMarker(null, ArrayList) に相当。
      *
-     * @param currentUsers 現在シグナリングサーバが返した周辺ユーザ一覧
+     * @param currentUsers 今つながっている相手（V2V版では参加中の交差点グループのメンバーの和集合）
      */
     public void removeStaleMarkers(final ArrayList<UserInfo> currentUsers) {
-        Log.d(TAG, "マーカ削除チェック: 現在マーカ数=" + markerList.size()
-                + " 周辺ユーザ数=" + currentUsers.size());
-
-        final List<MarkerInfo> toRemove = new ArrayList<>();
-        final List<MarkerInfo> toKeep = new ArrayList<>();
-
-        synchronized (markerList) {
-            for (MarkerInfo info : markerList) {
-                boolean found = false;
-                for (UserInfo user : currentUsers) {
-                    if (info.getPeerId().equals(user.getPeerId())) {
-                        found = true;
-                        break;
-                    }
-                }
-                if (found) toKeep.add(info);
-                else       toRemove.add(info);
-            }
+        final Set<String> ids = new HashSet<>();
+        for (UserInfo user : currentUsers) {
+            if (user.getPeerId() != null) ids.add(user.getPeerId());
         }
-
+        connectedIds = ids;
         uiHandler.post(() -> {
-            // [変更] marker.remove() → overlays からの削除（osmdroid の方式）
-            for (MarkerInfo info : toRemove) {
-                mapView.getOverlays().remove(info.getMarker());
-            }
-            synchronized (markerList) {
-                if (currentUsers.isEmpty()) {
-                    markerList.clear();
-                } else {
-                    markerList.clear();
-                    markerList.addAll(toKeep);
-                }
-            }
+            int before = peerMarkers.size();
+            removePins(id -> !ids.contains(id));
             mapView.invalidate();
-            Log.d(TAG, "マーカ削除完了: 削除数=" + toRemove.size());
+            Log.d(TAG, "マーカ削除チェック: 相手=" + ids.size() + " 削除数=" + (before - peerMarkers.size()));
         });
     }
 
@@ -555,23 +544,6 @@ public class MapManager {
     // =========================================================
     // ユーティリティ
     // =========================================================
-
-    /**
-     * [変更] 旧実装の waitUntilFinishAddMarker() を AtomicBoolean を使った安全な待機に変更。
-     * 最大待機時間を設けてデッドロックを防ぐ。
-     */
-    private void waitForMarkerReady() {
-        int waitCount = 0;
-        while (isAddingMarker.get() && waitCount < 20) { // 最大2秒待機
-            try {
-                Thread.sleep(100);
-                waitCount++;
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            }
-        }
-    }
 
     /**
      * [変更] 蛍光丸点 → 地図アプリらしいティアドロップ型ピンに変更。

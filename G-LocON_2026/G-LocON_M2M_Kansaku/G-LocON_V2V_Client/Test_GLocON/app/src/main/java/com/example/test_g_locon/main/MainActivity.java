@@ -482,10 +482,14 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                     : "つながっていない車の表示はSUMOモードのときだけです");
         } else if (checkedId == R.id.dispReal) {
             displayMode = MapManager.DISPLAY_REAL_ONLY;
+            showToast(appController != null && appController.isSumoMode()
+                    ? "実機だけ: ピン = P2Pでつながった実機，青い矢印 = つながっていない実機"
+                    : "実機だけ: ピン = P2Pでつながった実機");
         } else if (checkedId == R.id.dispNone) {
             displayMode = MapManager.DISPLAY_NONE;
         } else {
             displayMode = MapManager.DISPLAY_ALL;
+            showToast("P2P: つながった車だけをピンで表示（緑・赤 = 実機，灰色 = 仮想車両）");
         }
         mapManager.setDisplayMode(displayMode);
     }
