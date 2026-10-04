@@ -66,6 +66,7 @@
         急停止した車に後ろから近づいた車のうち，急停止した車とつながっていた割合と，つながった時点の距離（中央値）
 """
 import argparse
+import random
 import csv
 import itertools
 import math
@@ -88,6 +89,7 @@ SHORT_SEC = 10.0            # この秒数以下で切れた接続を「短い�
 REACT_SEC = 4.1
 DECEL_INFO = 2.0
 APPROACH_WINDOW = 15.0
+PASS_RADIUS_M = 20.0        # アプリと同じ: 交差点にこの距離まで近づいたら「通過済み」とする
 FLAP_CHANGE_M = 50.0        # つなぎ直し A（境目の出入り）: 切れてから SHORT_SEC 以内に，2台の距離の変化がこれ未満のままつながり直した
 NEAR_ES_M = 100.0           # エッジサーバ交差点からこの距離以内を「交差点の近く」とする
 LEAD_OK = 3.0               # 出会う何秒前からつながっていれば「事前につながっていた」とするか
@@ -183,6 +185,8 @@ class EtaScheme(Scheme):
         self.members = {iid: set() for iid in junction_xy}
         self.prev = {}
         self.asked = set()
+        self.passed = set()             # (交差点, 車): 通過済み
+        self.dnoise = {}                # 車 -> 交差点までの道のりの測位誤差 [m]（--gps-noise のとき）
 
     def update(self, t, now, alive, xy, speed):
         for v in alive:
@@ -200,14 +204,18 @@ class EtaScheme(Scheme):
                 eu = math.hypot(xy[v][0] - jx, xy[v][1] - jy)
                 prev = self.prev.get((iid, v))
                 self.prev[(iid, v)] = eu
+                d = self.routes.distance(v, iid)
+                if eu <= PASS_RADIUS_M or (v in mem and d is None):
+                    self.passed.add((iid, v))  # アプリと同じ: 20m まで近づいたら（または交差点を過ぎたら）通過済み
                 if v in mem:
-                    if eu >= self.delta and prev is not None and eu > prev:
+                    # 離脱はアプリと同じ3条件: 通過済み・δ 以上離れた・遠ざかっている
+                    if (iid, v) in self.passed and eu >= self.delta and prev is not None and eu > prev:
                         mem.discard(v)
                         self.ctrl += 1 + len(mem)
                     continue
-                d = self.routes.distance(v, iid)
                 if d is None:
                     continue
+                d = max(d + self.dnoise.get(v, 0.0), 0.0)
                 if d / max(speed[v], 1.0) < self.tau or eu < self.join_dist:
                     self.ctrl += 2 + len(mem)  # JOIN + メンバー一覧の返信 + 既存メンバーへの参加通知
                     mem.add(v)
@@ -362,6 +370,13 @@ def main():
     ap.add_argument("--search-period", type=float, default=2.0,
                     help="従来G-LocONの問い合わせ間隔 [秒]。元のアプリ（G-LocON_2024）は位置の更新2回ごと（約2秒）")
     ap.add_argument("--no-hazards", action="store_true", help="急停止を起こさない")
+    ap.add_argument("--gps-noise", type=float, default=0.0,
+                    help="測位誤差の標準偏差 [m]（東西・南北それぞれ）。接続の判断だけがこの誤差つきの位置を使い，評価は正しい位置で行う")
+    ap.add_argument("--gps-corr", type=float, default=0.0,
+                    help="測位誤差が続く時間 [秒]（0 = 毎秒ばらばら。大きいほどゆっくり変わる）")
+    ap.add_argument("--speed-wobble", type=float, default=0.0,
+                    help="1台の中での速度のゆらぎ（希望速度に対する標準偏差の割合。0.1 = ±10%ほど）")
+    ap.add_argument("--wobble-corr", type=float, default=10.0, help="速度のゆらぎが続く時間 [秒]")
     ap.add_argument("--period", type=float, default=None, help="車両の発生間隔 [秒]（指定すると交通流をその場で作る）")
     ap.add_argument("--min-distance", type=float, default=800, help="出発地と目的地の最小距離 [m]（--period のとき）")
     ap.add_argument("--fringe-factor", type=float, default=3, help="エリアの端を出発地・目的地に選ぶ重み（--period のとき）")
@@ -424,6 +439,11 @@ def main():
     seen_close = set()
     spd_hist = {}       # 車 -> [(時刻, 速度)]（1秒ごと。判断の余裕の計算用）
     es_xy = list(junction_xy.values())
+    nrng = random.Random(a.seed + 77)      # 測位誤差・速度のゆらぎ用（交通の乱数とは別）
+    gps_err = {}        # 車 -> [東西, 南北] の誤差
+    wob = {}            # 車 -> [もとの speedFactor, ゆらぎ]
+    ga = math.exp(-1.0 / a.gps_corr) if a.gps_corr > 0 else 0.0
+    wa = math.exp(-1.0 / a.wobble_corr) if a.wobble_corr > 0 else 0.0
     while traci.simulation.getMinExpectedNumber() > 0 and traci.simulation.getTime() < end_t:
         traci.simulationStep()
         now = traci.simulation.getTime()
@@ -483,6 +503,27 @@ def main():
         veh_seconds += len(alive)
         xy = {v: common.vehicle_xy(traci, v) for v in alive}
         speed = {v: traci.vehicle.getSpeed(v) for v in alive}
+        if a.speed_wobble > 0:
+            # 1台の中での速度のゆらぎ: 希望速度（speedFactor）を少しずつ上下させる。車間の保ち方は車両モデルのまま
+            for v in alive:
+                w = wob.get(v)
+                if w is None:
+                    w = wob[v] = [traci.vehicle.getSpeedFactor(v), nrng.gauss(0, a.speed_wobble)]
+                else:
+                    w[1] = wa * w[1] + math.sqrt(1 - wa * wa) * nrng.gauss(0, a.speed_wobble)
+                traci.vehicle.setSpeedFactor(v, max(w[0] * (1 + w[1]), 0.3))
+        xy_obs = xy
+        if a.gps_noise > 0:
+            # 測位誤差: 各車が自分の位置として知る値（接続の判断に使う）。評価は正しい位置 xy で行う
+            xy_obs = {}
+            for v in alive:
+                e = gps_err.get(v)
+                if e is None:
+                    e = gps_err[v] = [nrng.gauss(0, a.gps_noise), nrng.gauss(0, a.gps_noise)]
+                else:
+                    for i in (0, 1):
+                        e[i] = ga * e[i] + math.sqrt(1 - ga * ga) * nrng.gauss(0, a.gps_noise)
+                xy_obs[v] = (xy[v][0] + e[0], xy[v][1] + e[1])
         for v in alive:
             spd_hist.setdefault(v, []).append((now, speed[v]))
         vel, head = {}, {}
@@ -548,7 +589,9 @@ def main():
                 behind.append((key, pair(hv, m), d))
 
         for sc in schemes:
-            sc.update(traci, now, alive, xy, speed)
+            if a.gps_noise > 0 and hasattr(sc, "dnoise"):
+                sc.dnoise = {v: e[0] for v, e in gps_err.items()}
+            sc.update(traci, now, alive, xy_obs, speed)
             sc.account(now, alive, relevant, xy, veh_nodes)
             cur = sc.connected()
             for p, closing, kind, near in new_close:
@@ -586,7 +629,8 @@ def main():
         log = conn_log[sc.name]
         pc = sorted(sc.peer_counts)
         dur = sorted(sc.durations + [end_t - t0 for t0 in sc.since.values()])
-        res = {"scheme": sc.name, "period": a.period if a.period is not None else 1.5, "es_count": len(jids),
+        res = {"scheme": sc.name, "gps_noise": a.gps_noise, "gps_corr": a.gps_corr, "speed_wobble": a.speed_wobble,
+               "period": a.period if a.period is not None else 1.5, "es_count": len(jids),
                "vehicles": len(veh_routes), "concurrent": round(veh_seconds / max(end_t, 1)),
                "peers_mean": round(sum(pc) / max(len(pc), 1), 2),
                "peers_p95": pc[int(len(pc) * .95)] if pc else 0,
