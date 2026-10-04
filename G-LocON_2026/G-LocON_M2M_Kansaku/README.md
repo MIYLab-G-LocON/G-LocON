@@ -503,6 +503,7 @@ EdgeServerは交差点1つにつき1プロセス起動する．起動する交�
 > | `GLocON_1_servers.bat` | サーバ一式（SUMO用） |
 > | `GLocON_1_servers_fixed_route.bat` | サーバ一式（固定ルート用，評価①） |
 > | `GLocON_2_sumo_phone1_virtual.bat` | SUMO＋実機1台＋仮想車両（評価③．ふだんの確認はこれ） |
+> | `GLocON_2_sumo_phone1_virtual_control.bat` | 上に車両制御を加えたもの（急停止が起き，危険情報がグループ経由で届く．警告の確認用） |
 > | `GLocON_2_sumo_phones3.bat` | SUMO＋実機3台（評価②） |
 > | `GLocON_2_sumo_pc_only.bat` | スマホなし・PCだけ |
 >
@@ -519,6 +520,7 @@ EdgeServerは交差点1つにつき1プロセス起動する．起動する交�
 | `run_servers_fixed_route.bat` | 固定ルート用（評価①: ES1〜ES3）のサーバ一式 |
 | `run_bridge_A_phones3.bat` | 評価②: SUMO＋実機3台（sumo-gui あり） |
 | `run_bridge_B_virtual.bat` | 評価③: SUMO＋仮想クライアント＋実機1台（sumo-gui あり，実機の車を追従） |
+| `run_bridge_C_control.bat` | 評価③＋車両制御（`--control system --hazard-rule follower`．急停止が起き，接近中の車だけ減速．実機には警告が出る） |
 | `run_bridge_pc_only.bat` | スマホなし・PCだけで試す |
 | `make_desktop_launchers.bat` | 上の起動ファイルをデスクトップに作る（初回に1回） |
 

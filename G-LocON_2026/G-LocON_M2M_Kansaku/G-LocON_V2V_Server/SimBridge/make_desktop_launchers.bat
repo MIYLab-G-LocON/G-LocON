@@ -8,6 +8,8 @@ for /f "usebackq delims=" %%D in (`powershell -NoProfile -Command "[Environment]
 >> "%DESK%\GLocON_1_servers_fixed_route.bat" echo call "%~dp0run_servers_fixed_route.bat"
 > "%DESK%\GLocON_2_sumo_phone1_virtual.bat" echo @echo off
 >> "%DESK%\GLocON_2_sumo_phone1_virtual.bat" echo call "%~dp0run_bridge_B_virtual.bat"
+> "%DESK%\GLocON_2_sumo_phone1_virtual_control.bat" echo @echo off
+>> "%DESK%\GLocON_2_sumo_phone1_virtual_control.bat" echo call "%~dp0run_bridge_C_control.bat"
 > "%DESK%\GLocON_2_sumo_phones3.bat" echo @echo off
 >> "%DESK%\GLocON_2_sumo_phones3.bat" echo call "%~dp0run_bridge_A_phones3.bat"
 > "%DESK%\GLocON_2_sumo_pc_only.bat" echo @echo off
