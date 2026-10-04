@@ -34,6 +34,14 @@
         交差点で出会った2台（同じ交差点を 5秒以内に続けて通った2台）について，
         先の車が着いた時点でつながっていた割合，3秒以上前からつながっていた割合，つながってからの時間（中央値）。
         _es はエッジサーバのある交差点だけ，_all はエリア内の全交差点
+    pairs / reconnect_pct / conn_per_pair
+        一度でもつながった2台の組の数，そのうち2回以上つながり直した組の割合，1組あたりの接続回数
+    short_pct               10秒以下で切れた接続の割合
+    far_pct                 接続の間に一度も 50m 以内に近づかなかった接続の割合（近くをかすめただけの相手など）
+    enc_n / enc_connected / enc_lead3 / enc_lead_median
+        すれ違った2台（距離が初めて 30m 未満になった2台。交差点かどうかに関係なく位置だけで決める）について，
+        その時点でつながっていた割合，3秒以上前からつながっていた割合，つながってからの時間（中央値）。
+        _fast は近づく速さが 10 m/s 以上の2台だけ
     hz_followers / hz_coverage / hz_gap_median
         急停止した車に後ろから近づいた車のうち，急停止した車とつながっていた割合と，つながった時点の距離（中央値）
 """
@@ -50,6 +58,10 @@ from run_scenario import RouteIndex
 RELEVANT_HORIZON = 10.0     # この秒数以内に同じ交差点に入る2台を「関係がある」とする
 FOLLOW_M = 100.0            # 前後の車を「関係がある」とする距離
 MEET_WINDOW = 5.0           # 同じ交差点をこの秒数以内に続けて通った2台を「出会った」とする
+CLOSE_M = 30.0              # 2台の距離がこれ未満になったら「すれ違った」とする
+FAST_CLOSING = 10.0         # 近づく速さ（2台の速度の差の大きさ）[m/s] がこれ以上を「速い接近」とする
+FAR_M = 50.0                # 接続の間に一度もこの距離まで近づかなかった接続を「近づかないまま終わった接続」とする
+SHORT_SEC = 10.0            # この秒数以下で切れた接続を「短い接続」とする
 LEAD_OK = 3.0               # 出会う何秒前からつながっていれば「事前につながっていた」とするか
 
 
@@ -69,6 +81,10 @@ class Scheme:
         self.ctrl = 0
         self.peer_counts = []       # 毎秒・1台ごとの相手の数
         self.tp = self.conn_n = self.rel_n = 0
+        self.pair_times = {}        # (a,b) -> その2台がつながった回数（つなぎ直しの数え上げ）
+        self.mind = {}              # (a,b) -> 今の接続の間に最も近づいた距離
+        self.ended = []             # 終わった接続 [(続いた秒数, 最も近づいた距離)]
+        self.enc = []               # すれ違い [(近づく速さ, 何秒前からつながっていたか or None)]
 
     def connected(self):
         s = set()
@@ -77,14 +93,23 @@ class Scheme:
                 s.add(pair(v, p))
         return s
 
-    def account(self, now, alive, relevant):
+    def account(self, now, alive, relevant, xy):
         cur = self.connected()
         for p in cur:
             if p not in self.since:
                 self.since[p] = now
                 self.setups += 1
+                self.pair_times[p] = self.pair_times.get(p, 0) + 1
+                self.mind[p] = 1e9
+            a, b = p
+            if a in xy and b in xy:
+                d = math.hypot(xy[a][0] - xy[b][0], xy[a][1] - xy[b][1])
+                if d < self.mind[p]:
+                    self.mind[p] = d
         for p in [p for p in self.since if p not in cur]:
-            self.durations.append(now - self.since.pop(p))
+            dur = now - self.since.pop(p)
+            self.durations.append(dur)
+            self.ended.append((dur, self.mind.pop(p, 1e9)))
         for v in alive:
             self.peer_counts.append(len(self.peers.get(v, ())))
         self.conn_n += len(cur)
@@ -328,6 +353,7 @@ def main():
     step_len = traci.simulation.getDeltaT()
     end_t = traci.simulation.getEndTime()
     veh_seconds = 0
+    seen_close = set()
     while traci.simulation.getMinExpectedNumber() > 0 and traci.simulation.getTime() < end_t:
         traci.simulationStep()
         now = traci.simulation.getTime()
@@ -386,6 +412,10 @@ def main():
         veh_seconds += len(alive)
         xy = {v: common.vehicle_xy(traci, v) for v in alive}
         speed = {v: traci.vehicle.getSpeed(v) for v in alive}
+        vel = {}
+        for v in alive:
+            ang = math.radians(traci.vehicle.getAngle(v))
+            vel[v] = (speed[v] * math.sin(ang), speed[v] * math.cos(ang))
 
         # 関係のある2台: この先 H 秒以内に同じ交差点に入る，または 100m 以内の前後
         at = {}
@@ -401,6 +431,23 @@ def main():
             ld = traci.vehicle.getLeader(v, FOLLOW_M)
             if ld and ld[0] and ld[1] <= FOLLOW_M:
                 relevant.add(pair(v, ld[0]))
+
+        # すれ違い: 2台の距離が初めて CLOSE_M 未満になった時点（交差点かどうかに関係なく，位置だけで決める）
+        new_close = []
+        cgrid = {}
+        for v in alive:
+            cgrid.setdefault((int(xy[v][0] // CLOSE_M), int(xy[v][1] // CLOSE_M)), []).append(v)
+        for (cx, cy), vs in cgrid.items():
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    for q in cgrid.get((cx + dx, cy + dy), ()):
+                        for v in vs:
+                            if v < q and math.hypot(xy[v][0] - xy[q][0], xy[v][1] - xy[q][1]) < CLOSE_M:
+                                p = (v, q)
+                                if p not in seen_close:
+                                    seen_close.add(p)
+                                    va, vb = vel[v], vel[q]
+                                    new_close.append((p, math.hypot(va[0] - vb[0], va[1] - vb[1])))
 
         # 急停止した車に後ろから近づいた車
         behind = []
@@ -424,8 +471,10 @@ def main():
 
         for sc in schemes:
             sc.update(traci, now, alive, xy, speed)
-            sc.account(now, alive, relevant)
+            sc.account(now, alive, relevant, xy)
             cur = sc.connected()
+            for p, closing in new_close:
+                sc.enc.append((closing, now - sc.since[p] if p in sc.since else None))
             log = conn_log[sc.name]
             for p in cur:
                 iv = log.setdefault(p, [])
@@ -491,6 +540,22 @@ def main():
                 res[f"met_connected_{scope}"] = round(100 * con / max(n, 1), 1)
                 res[f"met_lead3_{scope}"] = round(100 * ok / max(n, 1), 1)
                 res[f"met_lead_median_{scope}"] = leads[len(leads) // 2] if leads else None
+        # つなぎ直し・短い接続・近づかないまま終わった接続
+        ended = sc.ended + [(end_t - t0, sc.mind.get(p, 1e9)) for p, t0 in sc.since.items()]
+        npairs = max(len(sc.pair_times), 1)
+        res["pairs"] = len(sc.pair_times)
+        res["reconnect_pct"] = round(100 * sum(1 for n in sc.pair_times.values() if n >= 2) / npairs, 1)
+        res["conn_per_pair"] = round(sum(sc.pair_times.values()) / npairs, 2)
+        res["short_pct"] = round(100 * sum(1 for d, _ in ended if d <= SHORT_SEC) / max(len(ended), 1), 1)
+        res["far_pct"] = round(100 * sum(1 for _, m in ended if m > FAR_M) / max(len(ended), 1), 1)
+        # すれ違い（距離が CLOSE_M 未満になった2台）: その時点でつながっていたか，何秒前からか
+        for tag, sel in (("", lambda c: True), ("_fast", lambda c: c >= FAST_CLOSING)):
+            e = [(c, l) for c, l in sc.enc if sel(c)]
+            ls = sorted(l for _, l in e if l is not None)
+            res[f"enc{tag}_n"] = len(e)
+            res[f"enc{tag}_connected"] = round(100 * len(ls) / max(len(e), 1), 1)
+            res[f"enc{tag}_lead3"] = round(100 * sum(1 for l in ls if l >= LEAD_OK) / max(len(e), 1), 1)
+            res[f"enc{tag}_lead_median"] = ls[len(ls) // 2] if ls else None
         gaps = sorted(d[sc.name] for d in foll.values() if sc.name in d)
         res["hz_followers"] = len(foll)
         res["hz_coverage"] = round(100 * len(gaps) / max(len(foll), 1), 1)
