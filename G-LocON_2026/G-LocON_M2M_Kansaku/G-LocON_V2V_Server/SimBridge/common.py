@@ -11,10 +11,12 @@ INTERSECTIONS_CSV = os.path.join(SCENARIO_DIR, "area_intersections.csv")   # エ
 SIM_EDGE_SERVERS_CSV = os.path.join(SCENARIO_DIR, "edge_servers.csv")      # ランダムに選んだエッジサーバ
 OUT_DIR = os.path.join(HERE, "out")
 
-# 対象エリア（正方形）。中心と一辺の長さで指定する。
-# osm/area.osm の範囲（緯度35.9435〜35.9545，経度139.6380〜139.6590 ≒ 1.2km×1.9km）に収まること
+# 対象エリア（長方形）。中心と，東西・南北の長さで指定する。
+# osm/area.osm の範囲（緯度35.9435〜35.9545，経度139.6380〜139.6590 ≒ 南北1.2km×東西1.9km）に収まること。
+# 2026/10/04: 1km四方 → 東西1.8km×南北1.15km に広げた（1ルートが短く，エッジサーバ交差点を1回しか通らない車が多かったため）
 AREA_CENTER = (35.9490, 139.6485)   # (lat, lon)
-AREA_SIDE_M = 1000.0
+AREA_WIDTH_M = 1800.0               # 東西
+AREA_HEIGHT_M = 1150.0              # 南北
 
 # エッジサーバのポート（EdgeServer は 1交差点1ポート）
 EDGE_SERVER_IP = "192.168.137.1"
@@ -44,13 +46,11 @@ def sumo_bin(name):
     return os.path.join(sumo_home(), "bin", exe)
 
 
-def area_bbox(center=None, side_m=None):
-    """正方形エリアの (lon_min, lat_min, lon_max, lat_max)."""
-    import math
+def area_bbox(center=None, width_m=None, height_m=None):
+    """長方形エリアの (lon_min, lat_min, lon_max, lat_max)."""
     lat, lon = center or AREA_CENTER
-    half = (side_m or AREA_SIDE_M) / 2.0
-    dlat = half / 111_320.0
-    dlon = half / (111_320.0 * math.cos(math.radians(lat)))
+    dlat = (height_m or AREA_HEIGHT_M) / 2.0 / 111_320.0
+    dlon = (width_m or AREA_WIDTH_M) / 2.0 / (111_320.0 * math.cos(math.radians(lat)))
     return lon - dlon, lat - dlat, lon + dlon, lat + dlat
 
 

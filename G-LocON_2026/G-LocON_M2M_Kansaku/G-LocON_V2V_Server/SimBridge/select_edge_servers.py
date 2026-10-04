@@ -1,9 +1,12 @@
-"""段階1-b: エリア内の交差点からランダムにエッジサーバを選ぶ.
+"""段階1-b: エリア内の交差点からエッジサーバを置く交差点を選ぶ.
 
-    python select_edge_servers.py [--count 10] [--seed 1] [--min-spacing 150]
+    python select_edge_servers.py [--count 20] [--by traffic] [--min-spacing 200]
+    python select_edge_servers.py --by random --seed 1      # ランダムに選ぶ
 
-    # 現在の配置（seed=1 のランダム配置のうち，画面中央上の1か所を中央の交差点へ移したもの）
-    python select_edge_servers.py --move 35.95152_139.64821=35.94917_139.64777
+--by traffic（既定）: 交通量の多い交差点から順に選ぶ（scenario/trips.rou.xml で，その交差点を通る車の数を数える。
+                      先に make_scenario.py --trips-only を実行しておく）。
+                      ランダムに選ぶと車の通らない交差点にも置かれ，1ルートで1回もグループに入らない車が多くなるため。
+--by random         : ランダムに選ぶ
 
 --move 元=先 : ランダムに選んだ交差点を別の交差点に置き換える（数・ポート・色はそのまま）
 
@@ -21,9 +24,10 @@ import common
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--count", type=int, default=10, help="エッジサーバの数")
+    ap.add_argument("--count", type=int, default=20, help="エッジサーバの数")
+    ap.add_argument("--by", choices=["traffic", "random"], default="traffic", help="選び方")
     ap.add_argument("--seed", type=int, default=1, help="選び方の乱数シード")
-    ap.add_argument("--min-spacing", type=float, default=150.0,
+    ap.add_argument("--min-spacing", type=float, default=200.0,
                     help="エッジサーバどうしの最小距離 [m]（近すぎる交差点を同時に選ばない）")
     ap.add_argument("--min-degree", type=int, default=3, help="この本数以上の道がつながる交差点から選ぶ")
     ap.add_argument("--move", action="append", default=[], metavar="元ID=先ID",
@@ -34,6 +38,21 @@ def main():
         rows = [r for r in csv.DictReader(f) if int(r["degree"]) >= a.min_degree]
     rng = random.Random(a.seed)
     rng.shuffle(rows)
+    if a.by == "traffic":
+        import os
+        import xml.etree.ElementTree as ET
+        trips = os.path.join(common.SCENARIO_DIR, "trips.rou.xml")
+        if not os.path.exists(trips):
+            raise SystemExit("trips.rou.xml がありません。先に python make_scenario.py --trips-only を実行してください")
+        net = common.load_net()
+        count = {}
+        for veh in ET.parse(trips).getroot().iter("vehicle"):
+            for e in veh.find("route").get("edges").split()[:-1]:      # 通り抜ける交差点（目的地の端は除く）
+                j = net.getEdge(e).getToNode().getID()
+                count[j] = count.get(j, 0) + 1
+        rows.sort(key=lambda r: -count.get(r["junctionId"], 0))        # 同数はシャッフルした順
+        for r in rows:
+            r["traffic"] = count.get(r["junctionId"], 0)
 
     def dist(p, q):
         dy = (float(p["lat"]) - float(q["lat"])) * 111_320
@@ -64,11 +83,13 @@ def main():
         print(f"{old} → {new}（他のエッジサーバまで最短 {near:.0f} m）")
 
     with open(common.SIM_EDGE_SERVERS_CSV, "w", encoding="utf-8", newline="") as f:
-        f.write(f"# ランダムに選んだエッジサーバ（{len(chosen)}か所, seed={a.seed}, 最小距離={a.min_spacing}m, "
+        f.write(f"# エッジサーバ（{len(chosen)}か所, 選び方={a.by}, seed={a.seed}, 最小距離={a.min_spacing}m, "
                 f"候補={len(rows)}交差点）" + (f" 移動: {', '.join(moved)}" if moved else "") + "\n")
         f.write("intersectionId,ip,port,junctionId\n")
         for k, r in enumerate(chosen):
             f.write(f"{r['intersectionId']},{common.EDGE_SERVER_IP},{common.EDGE_SERVER_BASE_PORT + k},{r['junctionId']}\n")
+    if a.by == "traffic":
+        print("通る車の数: " + ", ".join(str(r["traffic"]) for r in chosen))
     print(f"{len(chosen)} か所を選択 → {common.SIM_EDGE_SERVERS_CSV}")
 
 

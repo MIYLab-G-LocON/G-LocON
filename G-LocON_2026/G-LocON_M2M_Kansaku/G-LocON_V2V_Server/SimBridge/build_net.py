@@ -1,9 +1,9 @@
-"""段階1-a: 対象エリア（正方形）の道路網を作り，エリア内の全交差点を洗い出す.
+"""段階1-a: 対象エリア（長方形）の道路網を作り，エリア内の全交差点を洗い出す.
 
-    python build_net.py [--side 1000] [--center 35.9490,139.6485]
+    python build_net.py [--width 1800] [--height 1150] [--center 35.9490,139.6485]
 
 出力:
-    scenario/area.net.xml          正方形エリアで切り出したSUMO道路網（左側通行）
+    scenario/area.net.xml          エリアで切り出したSUMO道路網（左側通行）
     scenario/area_intersections.csv  エリア内の全交差点
         intersectionId（アプリと同じ "緯度5桁_経度5桁"）, lat, lon, junctionId, degree
 """
@@ -26,7 +26,7 @@ def convert(bbox):
         "--osm-files", common.OSM_FILE,
         "--type-files", typemap + "," + os.path.join(common.HERE, "osm", "service_passenger.typ.xml"),
         "-o", common.NET_FILE,
-        # 正方形エリアで切り出す
+        # エリアで切り出す
         "--keep-edges.in-geo-boundary", ",".join(f"{v:.6f}" for v in bbox),
         # 車が走る道路だけを残し，つながっていない断片は捨てる
         "--keep-edges.by-vclass", "passenger",
@@ -68,12 +68,14 @@ def extract_intersections():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--side", type=float, default=common.AREA_SIDE_M, help="正方形の一辺 [m]")
+    ap.add_argument("--width", type=float, default=common.AREA_WIDTH_M, help="東西の長さ [m]")
+    ap.add_argument("--height", type=float, default=common.AREA_HEIGHT_M, help="南北の長さ [m]")
     ap.add_argument("--center", default=None, help="中心の 緯度,経度（省略時は common.AREA_CENTER）")
     a = ap.parse_args()
     center = tuple(float(v) for v in a.center.split(",")) if a.center else None
-    bbox = common.area_bbox(center, a.side)
-    print(f"対象エリア: 経度 {bbox[0]:.5f}〜{bbox[2]:.5f}, 緯度 {bbox[1]:.5f}〜{bbox[3]:.5f}（一辺 {a.side:.0f} m）")
+    bbox = common.area_bbox(center, a.width, a.height)
+    print(f"対象エリア: 経度 {bbox[0]:.5f}〜{bbox[2]:.5f}, 緯度 {bbox[1]:.5f}〜{bbox[3]:.5f}"
+          f"（東西 {a.width:.0f} m × 南北 {a.height:.0f} m）")
     convert(bbox)
     rows = extract_intersections()
     print(f"エリア内の交差点: {len(rows)} か所 → {common.INTERSECTIONS_CSV}")

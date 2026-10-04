@@ -174,6 +174,7 @@ class Bridge:
         self.hw = None                      # hazard_log.csv
         self.stopping = []                  # 急停止中の車 [{veh, until, iid, hid}]
         self.warned = {}                    # 減速中の車 vid -> {orig, hazards:{hid: 最後に受信した時刻}}
+        self.via_cache = {}                 # (道路, 次の道路) → 交差点の中を通る線
         self.followers = None               # 急停止した車に近づいた車の記録（hazard_eval.FollowerTracker）
         self.last_stop = {}                 # 交差点 → 最後に急停止させた時刻（--hazard-rule follower）
         self.notified = set()               # (受信者, hid) 初回受信を記録済み
@@ -260,13 +261,51 @@ class Bridge:
 
     def route_shape(self, vid):
         """今いる道路から目的地までの道の形 [[緯度, 経度], ...]（アプリの地図のルート線用）."""
+        pts = []
+        for x, y in self.route_xy(vid):
+            lon, lat = self.net.convertXY2LonLat(x, y)
+            p = [round(lat, 6), round(lon, 6)]
+            if not pts or pts[-1] != p:
+                pts.append(p)
+        return pts
+
+    def junction_path(self, e1, e2):
+        """道路 e1 から e2 へ交差点の中を通る線（SUMO座標）。右左折の曲線になる.
+
+        道路の形だけをつなぐと，交差点の手前の端から次の道路の端へ直線で結ばれ，
+        地図のルート線が角の敷地を斜めに横切ってしまう。
+        """
+        key = (e1, e2)
+        if key not in self.via_cache:
+            pts = []
+            try:
+                for k in range(self.t.edge.getLaneNumber(e1)):
+                    link = next((ln for ln in self.t.lane.getLinks(f"{e1}_{k}")
+                                 if ln[0].rsplit("_", 1)[0] == e2), None)
+                    if link is None:
+                        continue
+                    via, guard = link[4], 0
+                    while via and guard < 5:              # 交差点内の線は途中で分かれていることがある
+                        pts += list(self.t.lane.getShape(via))
+                        nxt = self.t.lane.getLinks(via)
+                        via = nxt[0][4] if nxt else ""
+                        guard += 1
+                    break
+            except Exception:
+                pts = []
+            self.via_cache[key] = pts
+        return self.via_cache[key]
+
+    def route_xy(self, vid):
+        """今いる道路から目的地までの道の線（SUMO座標）。交差点の中の曲線も含む."""
         route = self.t.vehicle.getRoute(vid)
         idx = max(self.t.vehicle.getRouteIndex(vid), 0)
         pts = []
-        for e in route[idx:]:
-            for x, y in self.net.getEdge(e).getShape():
-                lon, lat = self.net.convertXY2LonLat(x, y)
-                p = [round(lat, 6), round(lon, 6)]
+        for k, e in enumerate(route[idx:], idx):
+            seg = list(self.net.getEdge(e).getShape())
+            if k + 1 < len(route):
+                seg += self.junction_path(e, route[k + 1])
+            for p in seg:
                 if not pts or pts[-1] != p:
                     pts.append(p)
         return pts
@@ -410,10 +449,10 @@ class Bridge:
             if d > h["trigger_m"] or spd < 3.0:
                 continue
             if self.a.hazard_rule == "follower":
-                if (now - self.last_stop.get(h["intersectionId"], -1e9) < hazard_eval.SAME_ES_INTERVAL
+                if (not hazard_eval.may_stop(self.last_stop, h["intersectionId"], now)
                         or not hazard_eval.follower_exists(t, v, self.alive)):
                     continue               # 後続車が現れるのを待つ（交差点を過ぎたら SKIP_PASSED）
-                self.last_stop[h["intersectionId"]] = now
+                hazard_eval.mark_stop(self.last_stop, h["intersectionId"], now)
             h["done"] = True
             t.vehicle.setDecel(v, h["decel"])
             t.vehicle.slowDown(v, 0.0, max(spd / h["decel"], 0.5))
@@ -609,12 +648,7 @@ class VirtualClient:
         self.path, self.cum, self.s_me = [], [], 0.0
         self.hazard = None
         if br.a.control == "system":
-            route = br.t.vehicle.getRoute(vid)
-            idx = max(br.t.vehicle.getRouteIndex(vid), 0)
-            for e in route[idx:]:
-                for p in br.net.getEdge(e).getShape():
-                    if not self.path or self.path[-1] != p:
-                        self.path.append(p)
+            self.path = br.route_xy(vid)
             d = 0.0
             for i, p in enumerate(self.path):
                 if i:
@@ -864,7 +898,8 @@ def main():
     ap.add_argument("--speed", type=float, default=1.0, help="実時間に対する進み方（1.0=実時間。動作確認用に大きくできる）")
     ap.add_argument("--duration", type=float, default=0, help="シミュレーション時間の上限[秒]（0=最後の車が着くまで）")
     ap.add_argument("--seed", type=int, default=1)
-    ap.add_argument("--min-es-on-route", type=int, default=1, help="実機に割り当てる車の条件（ルート上のエッジサーバ数）")
+    ap.add_argument("--min-es-on-route", type=int, default=3,
+                    help="実機に割り当てる車の条件（ルートが通るエッジサーバ交差点の数がこれ以上）")
     ap.add_argument("--bind-host", default="0.0.0.0")
     ap.add_argument("--bind-port", type=int, default=55700, help="スマホからの接続を受けるポート")
     ap.add_argument("--master", default=f"{common.EDGE_SERVER_IP}:55556", help="MasterServer の IP:ポート")

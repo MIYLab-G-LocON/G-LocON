@@ -195,10 +195,10 @@ def main():
             if d > h["trigger_m"] or spd < 3.0:
                 continue
             if a.hazard_rule == "follower":
-                if (now - last_stop.get(h["intersectionId"], -1e9) < hazard_eval.SAME_ES_INTERVAL
+                if (not hazard_eval.may_stop(last_stop, h["intersectionId"], now)
                         or not hazard_eval.follower_exists(traci, v, alive)):
                     continue               # 後続車が現れるのを待つ（交差点を過ぎたら SKIP_PASSED）
-                last_stop[h["intersectionId"]] = now
+                hazard_eval.mark_stop(last_stop, h["intersectionId"], now)
             h["done"] = True
             traci.vehicle.setDecel(v, h["decel"])
             traci.vehicle.slowDown(v, 0.0, max(spd / h["decel"], 0.5))

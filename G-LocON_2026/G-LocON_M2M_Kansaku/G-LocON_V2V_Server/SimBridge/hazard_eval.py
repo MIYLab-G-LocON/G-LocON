@@ -19,6 +19,7 @@ DECEL_RATE = 2.0           # 減速指示を受けた車の減速度 [m/s^2]
 FOLLOWER_MIN_M = 20.0      # --hazard-rule follower: 後続車がこの範囲にいるときだけ急停止させる
 FOLLOWER_MIN_SPEED = 5.0
 SAME_ES_INTERVAL = 40.0    # --hazard-rule follower: 同じ交差点で続けて急停止させない間隔 [秒]
+ANY_INTERVAL = 15.0        # --hazard-rule follower: エリア全体で続けて急停止させない間隔 [秒]（15分で最大60件ほど）
 
 
 def load_hazards(rule):
@@ -47,6 +48,17 @@ def follower_exists(traci, v, alive):
         if d is not None and d >= FOLLOWER_MIN_M and traci.vehicle.getSpeed(m) >= FOLLOWER_MIN_SPEED:
             return True
     return False
+
+
+def may_stop(last_stop, iid, now):
+    """--hazard-rule follower: 前の急停止から十分に時間があいているか（last_stop: 交差点→時刻，"*"=全体）."""
+    return (now - last_stop.get(iid, -1e9) >= SAME_ES_INTERVAL
+            and now - last_stop.get("*", -1e9) >= ANY_INTERVAL)
+
+
+def mark_stop(last_stop, iid, now):
+    last_stop[iid] = now
+    last_stop["*"] = now
 
 
 def slow_down_step(traci, m, warn_speed, step_len):

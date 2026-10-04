@@ -367,8 +367,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 appController.stopSimulation();
                 setSimButton(false);
                 setMode("現在地（GPS）", R.color.mode_gps);
-            } else {
-                appController.startSimulation();
+            } else if (!appController.hasRoute()) {
+                // SIM は「目的地」で取得したルートの上を走る。ルートが無いと走れないので手順を案内する
+                showSimGuide();
+            } else if (appController.startSimulation()) {
                 setSimButton(true);
                 setMode("仮想走行中（SIM）", R.color.mode_sim);
             }
@@ -376,12 +378,26 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         } else if (id == R.id.sumoButton) {
             // SUMOモード: PC上の SimBridge から割り当てられたSUMO車両として走行する
             if (appController.isSumoMode()) {
-                showToast("SUMOモード実行中です");
+                // もう一度押すと SUMO から切断する（サーバとの通信は続ける）
+                new MaterialAlertDialogBuilder(this)
+                        .setTitle("SUMOモードを終了しますか")
+                        .setMessage("SimBridge から切断し，参加中の交差点グループから離脱します。")
+                        .setPositiveButton("切断", (d, w) -> {
+                            appController.stopSumoMode();
+                            sumoButton.setText("SUMO");
+                            sumoButton.setIconResource(R.drawable.ic_car);
+                            modeTitleBeforeHazard = null;
+                            setMode(appController.isVirtualPosition() ? "仮想位置（実験場所）" : "現在地（GPS）",
+                                    R.color.mode_gps);
+                        })
+                        .setNegativeButton("続ける", null)
+                        .show();
             } else if (appController.startSumoMode(SERVER_IP)) {
                 appController.stopSimulation();
                 setSimButton(false);
                 routeCard.setVisibility(View.GONE);
-                sumoButton.setText("SUMO中");
+                sumoButton.setText("切断");
+                sumoButton.setIconResource(R.drawable.ic_stop);
                 cameraLevel = 17.0f;
                 mapView.getController().setZoom((double) cameraLevel);
                 setMode("SimBridge に接続中…", R.color.mode_sumo);
@@ -530,7 +546,16 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
     private void showJoinEtaDialog() {
         if (appController.isSumoMode()) {
-            showToast("SUMOモードでは sim_bridge.py の --join-eta / --leave-dist の値を使います");
+            // SUMOモードでは，仮想車両と同じ値にそろえるため PC 側（sim_bridge.py）の値を使う
+            new MaterialAlertDialogBuilder(this)
+                    .setTitle("SUMOモード中は PC 側で決めます")
+                    .setMessage("今の値: 参加 τ = " + Math.round(IntersectionManager.getJoinEtaSec())
+                            + "秒，離脱円 δ = " + Math.round(IntersectionManager.getLeaveThresholdM()) + "m\n\n"
+                            + "変えるには，PC で sim_bridge.py を起動するときに\n"
+                            + "--join-eta 30 --leave-dist 100 のように指定します。\n\n"
+                            + "スマホで選べるのは，SUMOを使わないとき（実際の位置・仮想位置・SIM）です。")
+                    .setPositiveButton("閉じる", null)
+                    .show();
             return;
         }
         final double[] c = IntersectionManager.JOIN_ETA_CANDIDATES_SEC;
@@ -574,6 +599,27 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 .show();
     }
 
+    /** SIM を押したがルートが無いとき: 手順を案内し，その場で仮想位置へ移動できるようにする */
+    private void showSimGuide() {
+        boolean virt = appController.isVirtualPosition();
+        MaterialAlertDialogBuilder b = new MaterialAlertDialogBuilder(this)
+                .setTitle("先にルートを設定してください")
+                .setMessage("SIM は，設定したルートの上を自動で走る機能です。\n\n"
+                        + (virt ? "① 仮想位置（設定済み）\n" : "① 「仮想位置」で実験場所へ移動\n")
+                        + "② 「目的地」でルートを取得（インターネット接続が必要）\n"
+                        + "③ 「SIM」で走行開始")
+                .setNegativeButton("閉じる", null);
+        if (virt) {
+            b.setPositiveButton("目的地を入力", (d, w) -> routeCard.setVisibility(View.VISIBLE));
+        } else {
+            b.setPositiveButton("仮想位置へ移動", (d, w) -> {
+                onClick(virtPosButton);
+                routeCard.setVisibility(View.VISIBLE);
+            });
+        }
+        b.show();
+    }
+
     /** SIMボタンの表示（走行中は「停止」） */
     private void setSimButton(boolean running) {
         simButton.setText(running ? "停止" : "SIM");
@@ -585,7 +631,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         mapManager.drawRoute(intersections, shape);
         joinedIds.clear();
         updateStatus();
-        if (!appController.isSumoMode()) showToast("ルート取得完了: 交差点数=" + intersections.size());
+        if (!appController.isSumoMode() && !intersections.isEmpty()) {
+            showToast("ルート取得完了: 交差点数=" + intersections.size());
+        }
     }
 
     @Override

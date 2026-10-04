@@ -1,6 +1,9 @@
 """段階1-c: エリア内を自由に走る交通流と，急停止イベントを作る.
 
     python make_scenario.py [--period 1.5] [--end 900] [--hazards 40] [--seed 1]
+    python make_scenario.py --trips-only     # 交通流だけ作る（エッジサーバを交通量で選ぶ前に使う）
+
+手順: build_net.py → make_scenario.py --trips-only → select_edge_servers.py → make_scenario.py
 
 作るもの（scenario/）:
     vtypes.add.xml    車両モデル
@@ -30,11 +33,27 @@ VTYPES = """    <vType id="car" vClass="passenger" carFollowModel="IDM"
 """
 
 
+def write_cfg(a):
+    with open(os.path.join(common.SCENARIO_DIR, "scenario.sumocfg"), "w", encoding="utf-8") as f:
+        f.write(f"""<configuration>
+    <input>
+        <net-file value="area.net.xml"/>
+        <route-files value="trips.rou.xml"/>
+        <additional-files value="vtypes.add.xml"/>
+    </input>
+    <time><begin value="0"/><end value="{a.end + 300}"/><step-length value="0.5"/></time>
+    <processing><time-to-teleport value="120"/><step-method.ballistic value="true"/></processing>
+    <random_number><seed value="{a.seed}"/></random_number>
+</configuration>
+""")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--period", type=float, default=1.5, help="車両の発生間隔 [秒]（小さいほど交通量が多い）")
     ap.add_argument("--end", type=int, default=900, help="車両を発生させる時間 [秒]")
-    ap.add_argument("--min-distance", type=float, default=400, help="出発地と目的地の最小距離 [m]")
+    ap.add_argument("--min-distance", type=float, default=800, help="出発地と目的地の最小距離 [m]")
+    ap.add_argument("--trips-only", action="store_true", help="交通流だけ作り，急停止イベントは作らない")
     ap.add_argument("--hazards", type=int, default=40, help="急停止イベントの数")
     ap.add_argument("--seed", type=int, default=1)
     a = ap.parse_args()
@@ -60,6 +79,12 @@ def main():
     txt = re.sub(r"<vType\b[^>]*?(/>|>.*?</vType>)\s*", "", txt, flags=re.S)   # vtypes.add.xml に一元化
     with open(trips, "w", encoding="utf-8") as f:
         f.write(txt)
+
+    write_cfg(a)
+    if a.trips_only:
+        n = sum(1 for _ in ET.parse(trips).getroot().iter("vehicle"))
+        print(f"車両 {n} 台（交通流のみ作成）")
+        return
 
     # 急停止イベント: エッジサーバ交差点を通る車からランダムに選び，その交差点の手前で止める。
     # 車両IDと場所を固定するので，V2Vなし／ありで全く同じ急停止が起きる（対応のある比較）
@@ -91,18 +116,6 @@ def main():
     with open(os.path.join(common.SCENARIO_DIR, "hazard_candidates.json"), "w", encoding="utf-8") as f:
         json.dump(cand, f, ensure_ascii=False, indent=1)
 
-    with open(os.path.join(common.SCENARIO_DIR, "scenario.sumocfg"), "w", encoding="utf-8") as f:
-        f.write(f"""<configuration>
-    <input>
-        <net-file value="area.net.xml"/>
-        <route-files value="trips.rou.xml"/>
-        <additional-files value="vtypes.add.xml"/>
-    </input>
-    <time><begin value="0"/><end value="{a.end + 300}"/><step-length value="0.5"/></time>
-    <processing><time-to-teleport value="120"/><step-method.ballistic value="true"/></processing>
-    <random_number><seed value="{a.seed}"/></random_number>
-</configuration>
-""")
     n = sum(1 for _ in ET.parse(trips).getroot().iter("vehicle"))
     print(f"車両 {n} 台（エリア内を自由に走行）, エッジサーバを通る車 {len(cands)} 台, 急停止イベント {len(hazards)} 件")
 

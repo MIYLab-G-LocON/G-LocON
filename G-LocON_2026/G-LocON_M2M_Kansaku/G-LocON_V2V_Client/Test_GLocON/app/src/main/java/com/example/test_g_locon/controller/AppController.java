@@ -636,6 +636,7 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
         if (p2p == null || edgeServerClient == null) return false;
         if (simBridge != null) return true;
         stopSimulation();
+        virtualBeforeSumo = useVirtualPosition;
         useVirtualPosition = true;              // GPS更新で位置を上書きしない
         simBridge = new SimBridgeClient(bridgeIp, SIM_BRIDGE_PORT, myUserInfo.getPeerId(),
                 new SimBridgeClient.Listener() {
@@ -684,6 +685,33 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
         return simBridge != null;
     }
 
+    /** SUMOモードに入る前に仮想位置だったか（終了時に戻す） */
+    private boolean virtualBeforeSumo = false;
+
+    /**
+     * SUMOモードを終了する（SUMOボタンをもう一度押したとき）。
+     * SimBridge に SIM_BYE を送って車を返し，JOIN中の交差点から離脱して，ルートと警告を消す。
+     * サーバとの通信（開始ボタンで始めたもの）は続ける。位置は SUMO に入る前の状態（GPS または仮想位置）に戻る。
+     */
+    public void stopSumoMode() {
+        final SimBridgeClient b = simBridge;
+        if (b == null) return;
+        simBridge = null;
+        b.stop();
+        if (p2p != null) p2p.setMyHazard(null);
+        activeHazards.clear();
+        callback.onHazardWarning(null);
+        callback.onSimVehicles(new ArrayList<>());
+        useVirtualPosition = virtualBeforeSumo;
+        routeExecutor.submit(() -> {
+            leaveAllIntersections();
+            routeS = 0;
+            routeShape = null;
+            intersectionManager.setIntersections(new ArrayList<>());
+            callback.onRouteLoaded(new ArrayList<>(), null);
+        });
+    }
+
     /** JOIN中の交差点からすべて離脱する（SUMO車両の乗り換え・到着時） */
     private void leaveAllIntersections() {
         for (Intersection i : intersectionManager.getIntersections()) {
@@ -730,11 +758,22 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
      * 交差点間を補間した座標列を1秒ごとに進み，ETAが正しく減少してJOIN/LEAVEが発火する。
      * 終端に達したら自動停止する。
      */
-    public void startSimulation() {
+    /** ルート（目的地ボタンで取得）が設定されているか。SIM はルートが無いと走れない */
+    public boolean hasRoute() {
+        return !intersectionManager.getIntersections().isEmpty();
+    }
+
+    /** 仮想位置（または SIM・SUMO の位置）を使っているか */
+    public boolean isVirtualPosition() {
+        return useVirtualPosition;
+    }
+
+    /** @return 走り始めたら true（ルートが無ければ false） */
+    public boolean startSimulation() {
         List<Intersection> list = intersectionManager.getIntersections();
         if (list.isEmpty()) {
             System.err.println("startSimulation: 交差点リストが空です。先にルートを設定してください。");
-            return;
+            return false;
         }
         stopSimulation();
         // 仮想位置モード中に GPS が引き起こした誤JOIN/LEAVEをリセットし
@@ -773,6 +812,7 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
         }, 0, SIM_INTERVAL_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
 
         System.out.println("仮想走行開始: 補間後" + simPath.size() + "ステップ speed=" + SIM_SPEED_MPS + "m/s");
+        return true;
     }
 
     /** 仮想走行を停止する */
