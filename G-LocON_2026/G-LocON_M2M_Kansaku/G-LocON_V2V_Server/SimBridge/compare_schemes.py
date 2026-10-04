@@ -49,8 +49,11 @@
     reconn_gap_median       切れてからつながり直すまでの時間（中央値）
     enc_n / enc_connected / enc_lead3 / enc_lead_median
         すれ違った2台（距離が初めて 30m 未満になった2台。交差点かどうかに関係なく位置だけで決める）について，
-        その時点でつながっていた割合，3秒以上前からつながっていた割合，つながってからの時間（中央値）。
-        _fast は近づく速さが 10 m/s 以上の2台だけ
+        その時点でつながっていた割合，T 秒以上前からつながっていた割合（lead1 / lead3 / lead5。
+        つなぐと決まってから実際に通信できるまで T 秒かかる場合に間に合う割合に当たる），つながってからの時間（中央値）。
+        _fast は近づく速さが 10 m/s 以上の2台だけ。
+        _cross / _oncoming / _same は，すれ違った時点の2台の向きの差で分けたもの
+        （cross: 45〜135度＝交差・右左折で出会う，oncoming: 135度超＝対向，same: 45度未満＝同じ向きの前後）
     hz_followers / hz_coverage / hz_gap_median
         急停止した車に後ろから近づいた車のうち，急停止した車とつながっていた割合と，つながった時点の距離（中央値）
 """
@@ -231,7 +234,7 @@ class DistScheme(Scheme):
             self.peers[v] = new
 
 
-def make_trips(out, period, end, min_distance, seed):
+def make_trips(out, period, end, min_distance, seed, fringe=3):
     """交通流をその場で作る（make_scenario.py と同じ作り方）."""
     import re
     import subprocess
@@ -242,7 +245,7 @@ def make_trips(out, period, end, min_distance, seed):
     subprocess.run([sys.executable, os.path.join(tools, "randomTrips.py"),
                     "-n", common.NET_FILE, "-o", os.path.join(out, "trips.trips.xml"),
                     "-r", trips, "-e", str(end), "-p", str(period), "--seed", str(seed),
-                    "--fringe-factor", "3", "--min-distance", str(min_distance), "--validate",
+                    "--fringe-factor", str(fringe), "--min-distance", str(min_distance), "--validate",
                     "--edge-permission", "passenger",
                     "--trip-attributes", 'type="car" departLane="best" departSpeed="max"',
                     "--prefix", "v", "--additional-file", vtypes],
@@ -341,6 +344,8 @@ def main():
                     help="従来G-LocONの問い合わせ間隔 [秒]。元のアプリ（G-LocON_2024）は位置の更新2回ごと（約2秒）")
     ap.add_argument("--no-hazards", action="store_true", help="急停止を起こさない")
     ap.add_argument("--period", type=float, default=None, help="車両の発生間隔 [秒]（指定すると交通流をその場で作る）")
+    ap.add_argument("--min-distance", type=float, default=800, help="出発地と目的地の最小距離 [m]（--period のとき）")
+    ap.add_argument("--fringe-factor", type=float, default=3, help="エリアの端を出発地・目的地に選ぶ重み（--period のとき）")
     ap.add_argument("--trip-seed", type=int, default=1, help="交通流（出発地・目的地）の乱数")
     ap.add_argument("--es-count", type=int, default=None, help="エッジサーバの数（指定すると交通量の多い順にその場で選ぶ）")
     ap.add_argument("--es-spacing", type=float, default=200.0, help="エッジサーバどうしの最小距離 [m]（--es-count のとき）")
@@ -355,7 +360,7 @@ def main():
     cmd = [common.sumo_bin("sumo"), "-c", cfg, "--seed", str(a.seed), "--no-step-log", "true", "--no-warnings", "true"]
     trips = os.path.join(common.SCENARIO_DIR, "trips.rou.xml")
     if a.period is not None:
-        trips = make_trips(out, a.period, 900, 800, a.trip_seed)
+        trips = make_trips(out, a.period, 900, a.min_distance, a.trip_seed, a.fringe_factor)
         cmd += ["--route-files", trips]
     veh_routes = read_routes(trips)
     if a.es_count is not None:
@@ -457,9 +462,10 @@ def main():
         veh_seconds += len(alive)
         xy = {v: common.vehicle_xy(traci, v) for v in alive}
         speed = {v: traci.vehicle.getSpeed(v) for v in alive}
-        vel = {}
+        vel, head = {}, {}
         for v in alive:
-            ang = math.radians(traci.vehicle.getAngle(v))
+            head[v] = traci.vehicle.getAngle(v)
+            ang = math.radians(head[v])
             vel[v] = (speed[v] * math.sin(ang), speed[v] * math.cos(ang))
 
         # 関係のある2台: この先 H 秒以内に同じ交差点に入る，または 100m 以内の前後
@@ -492,7 +498,9 @@ def main():
                                 if p not in seen_close:
                                     seen_close.add(p)
                                     va, vb = vel[v], vel[q]
-                                    new_close.append((p, math.hypot(va[0] - vb[0], va[1] - vb[1])))
+                                    dh = abs((head[v] - head[q] + 180.0) % 360.0 - 180.0)      # 向きの差 [度]
+                                    kind = "same" if dh < 45 else ("oncoming" if dh > 135 else "cross")
+                                    new_close.append((p, math.hypot(va[0] - vb[0], va[1] - vb[1]), kind))
 
         # 急停止した車に後ろから近づいた車
         behind = []
@@ -518,8 +526,8 @@ def main():
             sc.update(traci, now, alive, xy, speed)
             sc.account(now, alive, relevant, xy, veh_nodes)
             cur = sc.connected()
-            for p, closing in new_close:
-                sc.enc.append((closing, now - sc.since[p] if p in sc.since else None))
+            for p, closing, kind in new_close:
+                sc.enc.append((closing, now - sc.since[p] if p in sc.since else None, kind))
             log = conn_log[sc.name]
             for p in cur:
                 iv = log.setdefault(p, [])
@@ -613,12 +621,16 @@ def main():
         gaps_re = sorted(c["gap"] for c in re)
         res["reconn_gap_median"] = gaps_re[len(gaps_re) // 2] if gaps_re else None
         # すれ違い（距離が CLOSE_M 未満になった2台）: その時点でつながっていたか，何秒前からか
-        for tag, sel in (("", lambda c: True), ("_fast", lambda c: c >= FAST_CLOSING)):
-            e = [(c, l) for c, l in sc.enc if sel(c)]
+        for tag, sel in (("", lambda c, k: True), ("_fast", lambda c, k: c >= FAST_CLOSING),
+                         ("_cross", lambda c, k: k == "cross"), ("_oncoming", lambda c, k: k == "oncoming"),
+                         ("_same", lambda c, k: k == "same")):
+            e = [(c, l) for c, l, k in sc.enc if sel(c, k)]
             ls = sorted(l for _, l in e if l is not None)
             res[f"enc{tag}_n"] = len(e)
             res[f"enc{tag}_connected"] = round(100 * len(ls) / max(len(e), 1), 1)
-            res[f"enc{tag}_lead3"] = round(100 * sum(1 for l in ls if l >= LEAD_OK) / max(len(e), 1), 1)
+            # つなぐと決まってから実際に通信できるまで T 秒かかるとしたとき，すれ違いに間に合う割合（T = 1 / 3 / 5 秒）
+            for T in (1, 3, 5):
+                res[f"enc{tag}_lead{T}"] = round(100 * sum(1 for l in ls if l >= T) / max(len(e), 1), 1)
             res[f"enc{tag}_lead_median"] = ls[len(ls) // 2] if ls else None
         gaps = sorted(d[sc.name] for d in foll.values() if sc.name in d)
         res["hz_followers"] = len(foll)

@@ -24,7 +24,8 @@ def convert(bbox):
     cmd = [
         common.sumo_bin("netconvert"),
         "--osm-files", common.OSM_FILE,
-        "--type-files", typemap + "," + os.path.join(common.HERE, "osm", "service_passenger.typ.xml"),
+        "--type-files", ",".join([typemap, os.path.join(common.HERE, "osm", "service_passenger.typ.xml")]
+                                 + [os.path.join(common.HERE, "osm", f) for f in common.EXTRA_TYPE_FILES]),
         "-o", common.NET_FILE,
         # エリアで切り出す
         "--keep-edges.in-geo-boundary", ",".join(f"{v:.6f}" for v in bbox),

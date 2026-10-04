@@ -1,0 +1,322 @@
+[
+ {
+  "vehicle": "v104",
+  "intersectionId": "35.94884_139.64751",
+  "junction": "1103338452",
+  "trigger_m": 80,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v118",
+  "intersectionId": "35.95214_139.63772",
+  "junction": "1346777814",
+  "trigger_m": 60,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v145",
+  "intersectionId": "35.94884_139.64751",
+  "junction": "1103338452",
+  "trigger_m": 60,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v152",
+  "intersectionId": "35.96091_139.65006",
+  "junction": "3498333348",
+  "trigger_m": 100,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v158",
+  "intersectionId": "35.95798_139.64519",
+  "junction": "cluster_1369827508_1369827536",
+  "trigger_m": 80,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v159",
+  "intersectionId": "35.95659_139.65222",
+  "junction": "243467154",
+  "trigger_m": 40,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v162",
+  "intersectionId": "35.95112_139.63463",
+  "junction": "cluster_1104296146_3279712387",
+  "trigger_m": 100,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v230",
+  "intersectionId": "35.95265_139.63623",
+  "junction": "1346777501",
+  "trigger_m": 40,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v293",
+  "intersectionId": "35.95883_139.64253",
+  "junction": "cluster_1981027500_4253779939",
+  "trigger_m": 60,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v310",
+  "intersectionId": "35.95393_139.63200",
+  "junction": "cluster_1346792445_3279712428",
+  "trigger_m": 80,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v342",
+  "intersectionId": "35.95322_139.63771",
+  "junction": "1346777603",
+  "trigger_m": 40,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v378",
+  "intersectionId": "35.95940_139.63964",
+  "junction": "cluster_1116474076_12599758216_1981027515",
+  "trigger_m": 80,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v534",
+  "intersectionId": "35.96370_139.63650",
+  "junction": "cluster_1116474416_1369828601",
+  "trigger_m": 100,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v548",
+  "intersectionId": "35.95919_139.65389",
+  "junction": "cluster_243467172_243467174",
+  "trigger_m": 60,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v559",
+  "intersectionId": "35.95883_139.64253",
+  "junction": "cluster_1981027500_4253779939",
+  "trigger_m": 80,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v573",
+  "intersectionId": "35.96091_139.65006",
+  "junction": "3498333348",
+  "trigger_m": 80,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v582",
+  "intersectionId": "35.95793_139.64843",
+  "junction": "7197787781",
+  "trigger_m": 100,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v627",
+  "intersectionId": "35.95004_139.65916",
+  "junction": "1103422106",
+  "trigger_m": 100,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v650",
+  "intersectionId": "35.95118_139.65827",
+  "junction": "1103398249",
+  "trigger_m": 40,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v755",
+  "intersectionId": "35.94884_139.64751",
+  "junction": "1103338452",
+  "trigger_m": 100,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v883",
+  "intersectionId": "35.95940_139.63964",
+  "junction": "cluster_1116474076_12599758216_1981027515",
+  "trigger_m": 60,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v886",
+  "intersectionId": "35.95112_139.63463",
+  "junction": "cluster_1104296146_3279712387",
+  "trigger_m": 100,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v904",
+  "intersectionId": "35.95393_139.63200",
+  "junction": "cluster_1346792445_3279712428",
+  "trigger_m": 100,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v970",
+  "intersectionId": "35.96370_139.63650",
+  "junction": "cluster_1116474416_1369828601",
+  "trigger_m": 60,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v993",
+  "intersectionId": "35.94884_139.64751",
+  "junction": "1103338452",
+  "trigger_m": 80,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v1003",
+  "intersectionId": "35.95940_139.63964",
+  "junction": "cluster_1116474076_12599758216_1981027515",
+  "trigger_m": 80,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v1020",
+  "intersectionId": "35.95909_139.64142",
+  "junction": "cluster_1116474257_13130332670",
+  "trigger_m": 40,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v1028",
+  "intersectionId": "35.95112_139.63463",
+  "junction": "cluster_1104296146_3279712387",
+  "trigger_m": 100,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v1075",
+  "intersectionId": "35.95919_139.65389",
+  "junction": "cluster_243467172_243467174",
+  "trigger_m": 40,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v1107",
+  "intersectionId": "35.94884_139.64751",
+  "junction": "1103338452",
+  "trigger_m": 60,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v1122",
+  "intersectionId": "35.95919_139.65389",
+  "junction": "cluster_243467172_243467174",
+  "trigger_m": 100,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v1123",
+  "intersectionId": "35.95883_139.64253",
+  "junction": "cluster_1981027500_4253779939",
+  "trigger_m": 80,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v1188",
+  "intersectionId": "35.95247_139.63305",
+  "junction": "cluster_1346792426_3279712393",
+  "trigger_m": 100,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v1216",
+  "intersectionId": "35.95798_139.64519",
+  "junction": "cluster_1369827508_1369827536",
+  "trigger_m": 40,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v1240",
+  "intersectionId": "35.95772_139.64716",
+  "junction": "1116474618",
+  "trigger_m": 100,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v1273",
+  "intersectionId": "35.95214_139.63772",
+  "junction": "1346777814",
+  "trigger_m": 40,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v1318",
+  "intersectionId": "35.95063_139.64222",
+  "junction": "1103338437",
+  "trigger_m": 80,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v1352",
+  "intersectionId": "35.95102_139.64104",
+  "junction": "1103338465",
+  "trigger_m": 100,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v1439",
+  "intersectionId": "35.95559_139.63701",
+  "junction": "1104296145",
+  "trigger_m": 60,
+  "stop_sec": 12,
+  "decel": 8.0
+ },
+ {
+  "vehicle": "v1443",
+  "intersectionId": "35.95559_139.63701",
+  "junction": "1104296145",
+  "trigger_m": 60,
+  "stop_sec": 12,
+  "decel": 8.0
+ }
+]

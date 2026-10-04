@@ -31,6 +31,24 @@ pip install -r requirements.txt      # eclipse-sumo, traci, sumolib, pyproj
 通過判定の半径 20m は新しいシナリオでも足りている（エッジサーバ交差点 2,598回の通過で最接近距離の最大 12.8m）。
 実験結果は [実験記録（EXPERIMENTS.md）](../../EXPERIMENTS.md) にまとめている（このファイルには使い方だけを書く）。
 
+## 地図の切り替え（GLOCON_SCENARIO）
+
+| 環境変数 `GLOCON_SCENARIO` | 地図 | フォルダ | 用途 |
+|---|---|---|---|
+| （指定なし） | 大学周辺 1.8×1.15km。生活道路が中心 | `scenario/` | 実機実験，方式の比較 |
+| `arterial` | 3.0×2.7km。国道16号・県道5号を含む。信号44か所 | `scenario_arterial/` | 交通量・速度の高い道路での方式の比較（実サーバ・実機では使っていない） |
+
+```
+# PowerShell の例
+$env:GLOCON_SCENARIO="arterial"; python build_net.py      # 最初に1回（道路網 area.net.xml は大きいのでリポジトリに入れていない）
+$env:GLOCON_SCENARIO="arterial"; python compare_schemes.py --tag arterial
+Remove-Item Env:GLOCON_SCENARIO      # 元に戻す
+```
+
+`arterial` の作り方: `build_net.py` → `make_scenario.py --trips-only --period 0.6 --min-distance 1500 --fringe-factor 10`
+→ `select_edge_servers.py --count 40` → `make_scenario.py --period 0.6 --min-distance 1500 --fringe-factor 10`。
+地図データは `osm/arterial.osm`（道路だけを OpenStreetMap から取得），速度の既定は `osm/japan_speeds.typ.xml`。
+
 ## 使い方
 
 ```

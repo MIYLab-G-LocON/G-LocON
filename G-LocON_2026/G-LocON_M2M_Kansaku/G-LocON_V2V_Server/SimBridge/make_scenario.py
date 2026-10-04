@@ -53,6 +53,8 @@ def main():
     ap.add_argument("--period", type=float, default=1.5, help="車両の発生間隔 [秒]（小さいほど交通量が多い）")
     ap.add_argument("--end", type=int, default=900, help="車両を発生させる時間 [秒]")
     ap.add_argument("--min-distance", type=float, default=800, help="出発地と目的地の最小距離 [m]")
+    ap.add_argument("--fringe-factor", type=float, default=3,
+                    help="エリアの端の道路を出発地・目的地に選ぶ重み（大きいほど通り抜ける車が増える）")
     ap.add_argument("--trips-only", action="store_true", help="交通流だけ作り，急停止イベントは作らない")
     ap.add_argument("--hazards", type=int, default=40, help="急停止イベントの数")
     ap.add_argument("--seed", type=int, default=1)
@@ -69,7 +71,7 @@ def main():
     subprocess.run([sys.executable, os.path.join(tools, "randomTrips.py"),
                     "-n", common.NET_FILE, "-o", os.path.join(common.SCENARIO_DIR, "trips.trips.xml"),
                     "-r", trips, "-e", str(a.end), "-p", str(a.period), "--seed", str(a.seed),
-                    "--fringe-factor", "3", "--min-distance", str(a.min_distance), "--validate",
+                    "--fringe-factor", str(a.fringe_factor), "--min-distance", str(a.min_distance), "--validate",
                     "--edge-permission", "passenger",
                     "--trip-attributes", 'type="car" departLane="best" departSpeed="max"',
                     "--prefix", "v", "--additional-file", vtypes],

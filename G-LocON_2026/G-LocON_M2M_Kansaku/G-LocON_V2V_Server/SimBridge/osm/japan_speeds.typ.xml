@@ -1,0 +1,15 @@
+<!-- 制限速度が地図に書かれていない道路の速度を，日本の一般的な値にする。
+     SUMO標準の型定義は欧州向けで，速度が書かれていない道路を 補助幹線 80km/h・県道 100km/h・生活道路 50km/h として扱ってしまう。
+     国道 60 / 県道 50 / 補助幹線・その他の一般道 40 / 生活道路 30 [km/h]。地図に制限速度（maxspeed）がある道路はその値を使う。 -->
+<types>
+    <type id="highway.trunk" numLanes="2" speed="16.67" priority="13" oneway="false" disallow="rail rail_urban rail_electric rail_fast tram drone aircraft scooter container wheelchair subway cable_car ship pedestrian bicycle"/>
+    <type id="highway.primary" numLanes="2" speed="13.89" priority="12" oneway="false" disallow="rail rail_urban rail_electric rail_fast tram drone aircraft scooter container wheelchair subway cable_car ship"/>
+    <type id="highway.secondary" numLanes="1" speed="13.89" priority="11" oneway="false" disallow="rail rail_urban rail_electric rail_fast tram drone aircraft scooter container wheelchair subway cable_car ship"/>
+    <type id="highway.tertiary" numLanes="1" speed="11.11" priority="10" oneway="false" disallow="rail rail_urban rail_electric rail_fast tram drone aircraft scooter container wheelchair subway cable_car ship"/>
+    <type id="highway.trunk_link" numLanes="1" speed="11.11" priority="8" oneway="false" disallow="rail rail_urban rail_electric rail_fast tram drone aircraft scooter container wheelchair subway cable_car ship pedestrian bicycle"/>
+    <type id="highway.primary_link" numLanes="1" speed="11.11" priority="7" oneway="false" disallow="rail rail_urban rail_electric rail_fast tram drone aircraft scooter container wheelchair subway cable_car ship"/>
+    <type id="highway.secondary_link" numLanes="1" speed="11.11" priority="6" oneway="false" disallow="rail rail_urban rail_electric rail_fast tram drone aircraft scooter container wheelchair subway cable_car ship"/>
+    <type id="highway.tertiary_link" numLanes="1" speed="11.11" priority="5" oneway="false" disallow="rail rail_urban rail_electric rail_fast tram drone aircraft scooter container wheelchair subway cable_car ship"/>
+    <type id="highway.unclassified" numLanes="1" speed="11.11" priority="4" oneway="false" disallow="rail rail_urban rail_electric rail_fast tram drone aircraft scooter container wheelchair subway cable_car ship"/>
+    <type id="highway.residential" numLanes="1" speed="8.33" priority="3" oneway="false" disallow="rail rail_urban rail_electric rail_fast tram drone aircraft scooter container wheelchair subway cable_car ship"/>
+</types>

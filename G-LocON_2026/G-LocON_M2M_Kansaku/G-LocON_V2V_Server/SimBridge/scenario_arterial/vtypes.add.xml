@@ -1,0 +1,6 @@
+<additional>
+    <vType id="car" vClass="passenger" carFollowModel="IDM"
+           accel="2.6" decel="3.0" emergencyDecel="9.0" apparentDecel="3.0"
+           tau="1.0" actionStepLength="1.0" minGap="2.0" delta="4"
+           speedFactor="normc(1.0,0.1,0.8,1.2)" length="4.5"/>
+</additional>

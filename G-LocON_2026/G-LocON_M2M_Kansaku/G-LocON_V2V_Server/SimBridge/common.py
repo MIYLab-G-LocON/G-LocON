@@ -4,19 +4,28 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-OSM_FILE = os.path.join(HERE, "osm", "area.osm")
-SCENARIO_DIR = os.path.join(HERE, "scenario")
+
+# シナリオ（地図）の切り替え: 環境変数 GLOCON_SCENARIO で選ぶ（全スクリプト共通）。
+#   （指定なし） 大学周辺の生活道路中心の地図（scenario/）。実機実験にもこれを使う
+#   arterial     幹線道路（国道16号 東大宮バイパス・県道5号 第二産業道路）を含む広い地図（scenario_arterial/）。
+#                交通量・速度の高い道路での比較用（2026/10/04 追加）
+#   例（PowerShell）: $env:GLOCON_SCENARIO="arterial"; python compare_schemes.py
+SCENARIO = os.environ.get("GLOCON_SCENARIO", "").strip()
+_AREAS = {
+    # 名前: (地図データ, 中心(緯度, 経度), 東西[m], 南北[m], 追加の道路の型定義（osm/ 内）)
+    # 2026/10/04: 大学周辺は 1km四方 → 東西1.8km×南北1.15km に広げた
+    "": ("area.osm", (35.9490, 139.6485), 1800.0, 1150.0, []),
+    "arterial": ("arterial.osm", (35.9555, 139.6450), 3000.0, 2700.0, ["japan_speeds.typ.xml"]),
+}
+if SCENARIO not in _AREAS:
+    sys.exit(f"GLOCON_SCENARIO={SCENARIO!r} は未定義です（使える値: {[k for k in _AREAS if k]}，または指定なし）")
+_osm, AREA_CENTER, AREA_WIDTH_M, AREA_HEIGHT_M, EXTRA_TYPE_FILES = _AREAS[SCENARIO]
+OSM_FILE = os.path.join(HERE, "osm", _osm)
+SCENARIO_DIR = os.path.join(HERE, "scenario" + ("_" + SCENARIO if SCENARIO else ""))
 NET_FILE = os.path.join(SCENARIO_DIR, "area.net.xml")
 INTERSECTIONS_CSV = os.path.join(SCENARIO_DIR, "area_intersections.csv")   # エリア内の全交差点
-SIM_EDGE_SERVERS_CSV = os.path.join(SCENARIO_DIR, "edge_servers.csv")      # ランダムに選んだエッジサーバ
+SIM_EDGE_SERVERS_CSV = os.path.join(SCENARIO_DIR, "edge_servers.csv")      # エッジサーバを置く交差点
 OUT_DIR = os.path.join(HERE, "out")
-
-# 対象エリア（長方形）。中心と，東西・南北の長さで指定する。
-# osm/area.osm の範囲（緯度35.9435〜35.9545，経度139.6380〜139.6590 ≒ 南北1.2km×東西1.9km）に収まること。
-# 2026/10/04: 1km四方 → 東西1.8km×南北1.15km に広げた（1ルートが短く，エッジサーバ交差点を1回しか通らない車が多かったため）
-AREA_CENTER = (35.9490, 139.6485)   # (lat, lon)
-AREA_WIDTH_M = 1800.0               # 東西
-AREA_HEIGHT_M = 1150.0              # 南北
 
 # エッジサーバのポート（EdgeServer は 1交差点1ポート）
 EDGE_SERVER_IP = "192.168.137.1"
