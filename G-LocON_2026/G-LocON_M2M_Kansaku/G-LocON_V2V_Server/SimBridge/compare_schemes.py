@@ -31,6 +31,11 @@
     precision               つながっている相手のうち，関係のある相手の割合
     recall                  関係のある相手のうち，つながっている割合
         「関係のある相手」= この先 H 秒（既定10秒）以内に同じ交差点に入る車，または 100m 以内の前後の車
+    met_margin              交差点で出会った2台が，判断に必要な余裕より前からつながっていた割合。
+        必要な余裕 = 4.1秒（国土交通省のガイドラインの，情報提供から運転者の反応まで）+ 速度 ÷ 2.0 m/s^2（止まりきるまで）
+    reconn_A_per_veh_min / reconn_B_per_veh_min / reconn_A_pct
+        つなぎ直しを，切れている間の2台の距離の変化で分ける。A = 50m 未満（境目の出入り），B = 50m 以上（離れてからの再会）
+    enc_es_* / enc_es_same_* など   エッジサーバ交差点から 100m 以内で起きたすれ違いだけを取り出したもの
     met_n / met_connected / met_lead3 / met_lead_median
         交差点で出会った2台（同じ交差点を 5秒以内に続けて通った2台）について，
         先の車が着いた時点でつながっていた割合，3秒以上前からつながっていた割合，つながってからの時間（中央値）。
@@ -74,6 +79,14 @@ CLOSE_M = 30.0              # 2台の距離がこれ未満になったら「す�
 FAST_CLOSING = 10.0         # 近づく速さ（2台の速度の差の大きさ）[m/s] がこれ以上を「速い接近」とする
 FAR_M = 50.0                # 接続の間に一度もこの距離まで近づかなかった接続を「近づかないまま終わった接続」とする
 SHORT_SEC = 10.0            # この秒数以下で切れた接続を「短い接続」とする
+# 判断の余裕: 国土交通省「通信利用型運転支援システムのガイドライン」（平成23年3月）の値を使う。
+#   情報提供を始めてから運転者が反応するまで 3.7秒 + システム遅延 0.3秒 + 送信間隔 0.1秒 = 4.1秒，その後 2.0 m/s^2 で減速。
+#   必要な余裕 = REACT_SEC + 速度 / DECEL_INFO（止まりきるまで）。速度は交差点に着く前 APPROACH_WINDOW 秒間の最高速度。
+REACT_SEC = 4.1
+DECEL_INFO = 2.0
+APPROACH_WINDOW = 15.0
+FLAP_CHANGE_M = 50.0        # つなぎ直し: 切れている間の2台の距離の変化がこれ未満なら「境目の出入り」，以上なら「離れてからの再会」
+NEAR_ES_M = 100.0           # エッジサーバ交差点からこの距離以内を「交差点の近く」とする
 LEAD_OK = 3.0               # 出会う何秒前からつながっていれば「事前につながっていた」とするか
 
 
@@ -96,7 +109,7 @@ class Scheme:
         self.noshare = 0
         self.pair_times = {}        # (a,b) -> その2台がつながった回数（つなぎ直しの数え上げ）
         self.cur = {}               # (a,b) -> 今の接続の記録 {k: 何回目, mind: 最も近づいた距離, noshare, gap, gap_mind}
-        self.gap = {}               # (a,b) -> [前の接続が切れた時刻, 切れている間に最も近づいた距離]
+        self.gap = {}               # (a,b) -> [前の接続が切れた時刻, 切れている間の最小距離, 最大距離]
         self.ended = []             # 終わった接続の記録（上に dur: 続いた秒数 を足したもの）
         self.enc = []               # すれ違い [(近づく速さ, 何秒前からつながっていたか or None)]
 
@@ -116,15 +129,15 @@ class Scheme:
                 return math.hypot(xy[a][0] - xy[b][0], xy[a][1] - xy[b][1])
             return None
 
-        # 切れている間（前の接続が終わってから）の最も近づいた距離
+        # 切れている間（前の接続が終わってから）の2台の距離の最小・最大
         for p in list(self.gap):
-            if p in cur:
-                continue
             d = dist(p)
             if d is None:
                 del self.gap[p]            # どちらかが走り終えた
-            elif d < self.gap[p][1]:
-                self.gap[p][1] = d
+                continue
+            g = self.gap[p]
+            g[1] = min(g[1], d)
+            g[2] = max(g[2], d)
         for p in cur:
             if p not in self.since:
                 self.since[p] = now
@@ -136,7 +149,8 @@ class Scheme:
                 g = self.gap.pop(p, None)
                 self.cur[p] = {"k": k, "mind": 1e9, "noshare": noshare,
                                "gap": None if g is None else now - g[0],
-                               "gap_mind": None if g is None else g[1]}
+                               "gap_mind": None if g is None else g[1],
+                               "gap_change": None if g is None else g[2] - g[1]}
             d = dist(p)
             if d is not None and d < self.cur[p]["mind"]:
                 self.cur[p]["mind"] = d
@@ -146,7 +160,9 @@ class Scheme:
             c = self.cur.pop(p)
             c["dur"] = dur
             self.ended.append(c)
-            self.gap[p] = [now, 1e9]
+            d = dist(p)
+            if d is not None:
+                self.gap[p] = [now, d, d]   # [切れた時刻, 切れている間の最小距離, 最大距離]
         for v in alive:
             self.peer_counts.append(len(self.peers.get(v, ())))
         self.conn_n += len(cur)
@@ -403,6 +419,8 @@ def main():
     end_t = traci.simulation.getEndTime()
     veh_seconds = 0
     seen_close = set()
+    spd_hist = {}       # 車 -> [(時刻, 速度)]（1秒ごと。判断の余裕の計算用）
+    es_xy = list(junction_xy.values())
     while traci.simulation.getMinExpectedNumber() > 0 and traci.simulation.getTime() < end_t:
         traci.simulationStep()
         now = traci.simulation.getTime()
@@ -462,6 +480,8 @@ def main():
         veh_seconds += len(alive)
         xy = {v: common.vehicle_xy(traci, v) for v in alive}
         speed = {v: traci.vehicle.getSpeed(v) for v in alive}
+        for v in alive:
+            spd_hist.setdefault(v, []).append((now, speed[v]))
         vel, head = {}, {}
         for v in alive:
             head[v] = traci.vehicle.getAngle(v)
@@ -500,7 +520,9 @@ def main():
                                     va, vb = vel[v], vel[q]
                                     dh = abs((head[v] - head[q] + 180.0) % 360.0 - 180.0)      # 向きの差 [度]
                                     kind = "same" if dh < 45 else ("oncoming" if dh > 135 else "cross")
-                                    new_close.append((p, math.hypot(va[0] - vb[0], va[1] - vb[1]), kind))
+                                    mx, my = (xy[v][0] + xy[q][0]) / 2, (xy[v][1] + xy[q][1]) / 2
+                                    near = any(math.hypot(mx - ex, my - ey) <= NEAR_ES_M for ex, ey in es_xy)
+                                    new_close.append((p, math.hypot(va[0] - vb[0], va[1] - vb[1]), kind, near))
 
         # 急停止した車に後ろから近づいた車
         behind = []
@@ -526,8 +548,8 @@ def main():
             sc.update(traci, now, alive, xy, speed)
             sc.account(now, alive, relevant, xy, veh_nodes)
             cur = sc.connected()
-            for p, closing, kind in new_close:
-                sc.enc.append((closing, now - sc.since[p] if p in sc.since else None, kind))
+            for p, closing, kind, near in new_close:
+                sc.enc.append((closing, now - sc.since[p] if p in sc.since else None, kind, near))
             log = conn_log[sc.name]
             for p in cur:
                 iv = log.setdefault(p, [])
@@ -549,7 +571,12 @@ def main():
                 if t2 - t1 > MEET_WINDOW:
                     break
                 if v1 != v2:
-                    meets.append((node, t1, v1, v2))
+                    meets.append((node, t1, v1, v2, t2))
+
+    def need(v, t):
+        """車 v が時刻 t に交差点に着くとき，判断に必要な余裕 [秒]（ガイドラインの反応時間 + 止まりきるまで）."""
+        vmax = max((sp for tt, sp in spd_hist.get(v, ()) if t - APPROACH_WINDOW <= tt <= t), default=0.0)
+        return REACT_SEC + vmax / DECEL_INFO
 
     rows = []
     for sc in schemes:
@@ -570,9 +597,9 @@ def main():
             w = csv.writer(f, lineterminator="\n")
             w.writerow(["junction", "edge_server", "t_first", "a", "b", "connected", "lead_sec"])
             for scope, nodes in (("es", es_nodes), ("all", all_nodes)):
-                n = con = ok = 0
+                n = con = ok = ok10 = okm = 0
                 leads = []
-                for node, t1, v1, v2 in meets:
+                for node, t1, v1, v2, t2 in meets:
                     if node not in nodes:
                         continue
                     n += 1
@@ -584,6 +611,9 @@ def main():
                     if lead is not None:
                         con += 1
                         ok += lead >= LEAD_OK
+                        ok10 += lead >= 10.0
+                        # 判断の余裕: 2台とも，自分が交差点に着く時点で必要な余裕より前からつながっていたか
+                        okm += lead >= need(v1, t1) and (lead + t2 - t1) >= need(v2, t2)
                         leads.append(lead)
                     if scope == "all":
                         w.writerow([node, int(node in es_nodes), f"{t1:.1f}", v1, v2,
@@ -592,6 +622,8 @@ def main():
                 res[f"met_n_{scope}"] = n
                 res[f"met_connected_{scope}"] = round(100 * con / max(n, 1), 1)
                 res[f"met_lead3_{scope}"] = round(100 * ok / max(n, 1), 1)
+                res[f"met_lead10_{scope}"] = round(100 * ok10 / max(n, 1), 1)
+                res[f"met_margin_{scope}"] = round(100 * okm / max(n, 1), 1)
                 res[f"met_lead_median_{scope}"] = leads[len(leads) // 2] if leads else None
         # 無駄な接続・つなぎ直し・短い接続
         ended = list(sc.ended)
@@ -618,13 +650,22 @@ def main():
         res["reconn_quick_pct"] = round(100 * sum(1 for c in re if c["gap"] <= SHORT_SEC) / n_re, 1)
         res["reconn_near_pct"] = round(100 * sum(1 for c in re if c["gap_mind"] <= FAR_M) / n_re, 1)
         res["reconn_wasted_pct"] = round(100 * sum(1 for c in re if wasted(c)) / n_re, 1)
+        # A: 境目の出入り（切れている間，2台の距離がほとんど変わらなかった）／ B: 離れてからの再会
+        re_ab = [c for c in re if c["gap_change"] is not None]
+        nA = sum(1 for c in re_ab if c["gap_change"] < FLAP_CHANGE_M)
+        res["reconn_A_per_veh_min"] = round(2 * nA / max(veh_seconds, 1) * 60, 2)
+        res["reconn_B_per_veh_min"] = round(2 * (len(re_ab) - nA) / max(veh_seconds, 1) * 60, 2)
+        res["reconn_A_pct"] = round(100 * nA / max(len(re_ab), 1), 1)
         gaps_re = sorted(c["gap"] for c in re)
         res["reconn_gap_median"] = gaps_re[len(gaps_re) // 2] if gaps_re else None
         # すれ違い（距離が CLOSE_M 未満になった2台）: その時点でつながっていたか，何秒前からか
-        for tag, sel in (("", lambda c, k: True), ("_fast", lambda c, k: c >= FAST_CLOSING),
-                         ("_cross", lambda c, k: k == "cross"), ("_oncoming", lambda c, k: k == "oncoming"),
-                         ("_same", lambda c, k: k == "same")):
-            e = [(c, l) for c, l, k in sc.enc if sel(c, k)]
+        for tag, sel in (("", lambda c, k, ne: True), ("_fast", lambda c, k, ne: c >= FAST_CLOSING),
+                         ("_cross", lambda c, k, ne: k == "cross"), ("_oncoming", lambda c, k, ne: k == "oncoming"),
+                         ("_same", lambda c, k, ne: k == "same"),
+                         ("_es", lambda c, k, ne: ne), ("_es_cross", lambda c, k, ne: ne and k == "cross"),
+                         ("_es_oncoming", lambda c, k, ne: ne and k == "oncoming"),
+                         ("_es_same", lambda c, k, ne: ne and k == "same")):
+            e = [(c, l) for c, l, k, ne in sc.enc if sel(c, k, ne)]
             ls = sorted(l for _, l in e if l is not None)
             res[f"enc{tag}_n"] = len(e)
             res[f"enc{tag}_connected"] = round(100 * len(ls) / max(len(e), 1), 1)
