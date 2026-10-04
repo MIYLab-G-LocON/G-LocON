@@ -186,6 +186,8 @@ LEAVE の後の色替えは，**描かれた車の後端が離脱円を出るま
 
 ## 接続相手の決め方の比較（compare_schemes.py）
 
+> 実験ごとの目的・方法・結果・考察は [実験記録（EXPERIMENTS.md）](../../EXPERIMENTS.md) にまとめている。交通量・エッジサーバ数を変えた結果もそちら。
+
 本システム（進行先の交差点・ETA）と従来G-LocON（自車の周りの距離）で，「誰とつなぐか」の決め方だけを比べる。
 同じ SUMO の走行（V2Vなし・急停止あり）の上で全方式を同時に計算するので，車の動きは完全に同じ。
 通信の損失・遅延は無いものとし，実際のサーバは使わない（方式そのものの比較）。
@@ -194,6 +196,9 @@ LEAVE の後の色替えは，**描かれた車の後端が離脱円を出るま
 python compare_schemes.py                       # τ=15/30/45（δ=60），半径 100/200/300m → out/compare_s1/schemes.csv
 python compare_schemes.py --seed 2              # SUMOの乱数を変える（車の出発地・目的地は同じ）
 python compare_schemes.py --taus 15 --deltas 30,60,100 --radii 200 --tag s1_delta
+python compare_schemes.py --period 1.0 --es-count 20 --tag p1.0   # 交通量を変える（車の発生間隔 [秒]）
+python compare_schemes.py --es-count 40 --es-spacing 100 --tag es40   # エッジサーバの数・間隔を変える
+python compare_schemes.py --join-dists 0,100 --tag join          # 改良案: 道のり100m未満なら ETA に関係なく参加
 ```
 
 - 従来G-LocON: 各車が5秒ごとにサーバへ問い合わせ，半径 R 以内の車とつながる（アプリの既定は R=200m・5秒）。

@@ -1,6 +1,11 @@
 """接続相手の決め方の比較: 本システム（進行先の交差点・ETA）と 従来G-LocON（自車の周りの距離）.
 
     python compare_schemes.py [--seed 1] [--tag s1]
+    python compare_schemes.py --period 0.75 --tag p075        # 交通量を変える（車の発生間隔 [秒]。既定のシナリオは 1.5）
+    python compare_schemes.py --es-count 40 --tag es40        # エッジサーバの数を変える（交通量の多い交差点から順に選ぶ）
+
+--period / --es-count を付けると，scenario/ のファイルは変えずに，その条件の交通流・エッジサーバ配置をその場で作って使う
+（サーバは起動しないので，エッジサーバをいくつにしても PC の負荷は変わらない）。
 
 同じ SUMO の走行（V2Vなし・急停止あり）の上で，複数の方式を同時に計算する。
 車の動きは全方式で完全に同じなので，差は「誰とつなぐか」の決め方だけから生じる（通信の損失・遅延は無いものとする）。
@@ -8,6 +13,8 @@
 方式:
     eta_t<τ>_d<δ>   本システム: エッジサーバ交差点への ETA < τ で参加，通過して δ 離れ遠ざかったら離脱。
                     同じ交差点グループの車どうしがつながる
+    eta_t<τ>_d<δ>_j<D>  改良案（未実装・比較のみ）: 上に加えて，交差点までの道のりが D 未満なら ETA に関係なく参加
+                    （渋滞で止まっている車は ETA が大きくなり，交差点のすぐ手前にいても参加しないため）
     dist_r<R>       従来G-LocON: 各車が T 秒ごと（既定5秒）にサーバへ問い合わせ，半径 R 以内の車とつながる
 
 出力 out/compare_<tag>/:
@@ -88,9 +95,10 @@ class Scheme:
 class EtaScheme(Scheme):
     """本システム: エッジサーバ交差点への ETA < τ で参加，通過して δ 離れ遠ざかったら離脱."""
 
-    def __init__(self, tau, delta, junction_xy, routes):
-        super().__init__(f"eta_t{int(tau)}_d{int(delta)}")
+    def __init__(self, tau, delta, junction_xy, routes, join_dist=0.0):
+        super().__init__(f"eta_t{int(tau)}_d{int(delta)}" + (f"_j{int(join_dist)}" if join_dist > 0 else ""))
         self.tau, self.delta, self.j, self.routes = tau, delta, junction_xy, routes
+        self.join_dist = join_dist      # 改良案: 交差点までの道のりがこの距離未満なら，ETA に関係なく参加する
         self.members = {iid: set() for iid in junction_xy}
         self.prev = {}
         self.asked = set()
@@ -119,7 +127,7 @@ class EtaScheme(Scheme):
                 d = self.routes.distance(v, iid)
                 if d is None:
                     continue
-                if d / max(speed[v], 1.0) < self.tau:
+                if d / max(speed[v], 1.0) < self.tau or d < self.join_dist:
                     self.ctrl += 2 + len(mem)  # JOIN + メンバー一覧の返信 + 既存メンバーへの参加通知
                     mem.add(v)
         self.peers = {}
@@ -164,6 +172,81 @@ class DistScheme(Scheme):
             self.peers[v] = new
 
 
+def make_trips(out, period, end, min_distance, seed):
+    """交通流をその場で作る（make_scenario.py と同じ作り方）."""
+    import re
+    import subprocess
+    import sys
+    trips = os.path.join(out, "trips.rou.xml")
+    tools = os.path.join(common.sumo_home(), "tools")
+    vtypes = os.path.join(common.SCENARIO_DIR, "vtypes.add.xml")
+    subprocess.run([sys.executable, os.path.join(tools, "randomTrips.py"),
+                    "-n", common.NET_FILE, "-o", os.path.join(out, "trips.trips.xml"),
+                    "-r", trips, "-e", str(end), "-p", str(period), "--seed", str(seed),
+                    "--fringe-factor", "3", "--min-distance", str(min_distance), "--validate",
+                    "--edge-permission", "passenger",
+                    "--trip-attributes", 'type="car" departLane="best" departSpeed="max"',
+                    "--prefix", "v", "--additional-file", vtypes],
+                   check=True, stdout=subprocess.DEVNULL)
+    with open(trips, encoding="utf-8") as f:
+        txt = f.read()
+    txt = re.sub(r"<vType\b[^>]*?(/>|>.*?</vType>)\s*", "", txt, flags=re.S)
+    with open(trips, "w", encoding="utf-8") as f:
+        f.write(txt)
+    return trips
+
+
+def read_routes(trips):
+    import xml.etree.ElementTree as ET
+    return [(v.get("id"), float(v.get("depart")), v.find("route").get("edges").split())
+            for v in ET.parse(trips).getroot().iter("vehicle") if v.find("route") is not None]
+
+
+def choose_edge_servers(net, veh_routes, count, spacing):
+    """交通量の多い交差点から順に count か所選ぶ（select_edge_servers.py --by traffic と同じ）. {junctionId: junctionId}"""
+    import random
+    with open(common.INTERSECTIONS_CSV, encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    random.Random(1).shuffle(rows)
+    cnt = {}
+    for _, _, edges in veh_routes:
+        for e in edges[:-1]:
+            j = net.getEdge(e).getToNode().getID()
+            cnt[j] = cnt.get(j, 0) + 1
+    rows.sort(key=lambda r: -cnt.get(r["junctionId"], 0))
+
+    def dist(p, q):
+        dy = (float(p["lat"]) - float(q["lat"])) * 111_320
+        dx = (float(p["lon"]) - float(q["lon"])) * 111_320 * math.cos(math.radians(float(p["lat"])))
+        return math.hypot(dx, dy)
+
+    chosen = []
+    for r in rows:
+        if all(dist(r, c) >= spacing for c in chosen):
+            chosen.append(r)
+        if len(chosen) == count:
+            break
+    return {r["junctionId"]: r["junctionId"] for r in chosen}
+
+
+def hazard_candidates(net, veh_routes, jids, seed):
+    """エッジサーバ交差点を通る車すべてを急停止の候補にする（make_scenario.py と同じ）."""
+    import random
+    es = set(jids.values())
+    rng = random.Random(seed + 1000)
+    out = []
+    for vid, depart, edges in veh_routes:
+        if depart < 60:
+            continue
+        for e in edges[1:]:
+            j = net.getEdge(e).getToNode().getID()
+            if j in es:
+                out.append({"vehicle": vid, "intersectionId": j, "trigger_m": rng.choice([40, 60, 80, 100]),
+                            "stop_sec": 12, "decel": 8.0})
+                break
+    return out
+
+
 def upcoming(t, v, route, to_node, horizon):
     """この先 horizon 秒以内に入る交差点（junctionId）."""
     idx = max(t.vehicle.getRouteIndex(v), 0)
@@ -189,9 +272,15 @@ def main():
     ap.add_argument("--tag", default="")
     ap.add_argument("--taus", default="15,30,45", help="本システムの τ [秒]（カンマ区切り）")
     ap.add_argument("--deltas", default="60", help="本システムの δ [m]（カンマ区切り）")
+    ap.add_argument("--join-dists", default="0",
+                    help="改良案: 交差点までの道のりがこの距離 [m] 未満なら ETA に関係なく参加（0=なし。カンマ区切り）")
     ap.add_argument("--radii", default="100,200,300", help="従来G-LocONの検索半径 [m]（カンマ区切り。アプリの既定は200）")
-    ap.add_argument("--period", type=float, default=5.0, help="従来G-LocONの問い合わせ間隔 [秒]（アプリの既定は5）")
+    ap.add_argument("--search-period", type=float, default=5.0, help="従来G-LocONの問い合わせ間隔 [秒]（アプリの既定は5）")
     ap.add_argument("--no-hazards", action="store_true", help="急停止を起こさない")
+    ap.add_argument("--period", type=float, default=None, help="車両の発生間隔 [秒]（指定すると交通流をその場で作る）")
+    ap.add_argument("--trip-seed", type=int, default=1, help="交通流（出発地・目的地）の乱数")
+    ap.add_argument("--es-count", type=int, default=None, help="エッジサーバの数（指定すると交通量の多い順にその場で選ぶ）")
+    ap.add_argument("--es-spacing", type=float, default=200.0, help="エッジサーバどうしの最小距離 [m]（--es-count のとき）")
     a = ap.parse_args()
 
     common.sumo_home()
@@ -199,10 +288,19 @@ def main():
     out = os.path.join(common.OUT_DIR, "compare_" + (a.tag or f"s{a.seed}"))
     os.makedirs(out, exist_ok=True)
     cfg = os.path.join(common.SCENARIO_DIR, "scenario.sumocfg")
-    traci.start([common.sumo_bin("sumo"), "-c", cfg, "--seed", str(a.seed),
-                 "--no-step-log", "true", "--no-warnings", "true"])
     net = common.load_net()
-    jids = common.read_sim_edge_servers()
+    cmd = [common.sumo_bin("sumo"), "-c", cfg, "--seed", str(a.seed), "--no-step-log", "true", "--no-warnings", "true"]
+    trips = os.path.join(common.SCENARIO_DIR, "trips.rou.xml")
+    if a.period is not None:
+        trips = make_trips(out, a.period, 900, 800, a.trip_seed)
+        cmd += ["--route-files", trips]
+    veh_routes = read_routes(trips)
+    if a.es_count is not None:
+        jids = choose_edge_servers(net, veh_routes, a.es_count, a.es_spacing)
+    else:
+        jids = common.read_sim_edge_servers()
+    custom = a.period is not None or a.es_count is not None
+    traci.start(cmd)
     es_nodes = set(jids.values())
     junction_xy = {iid: traci.junction.getPosition(j) for iid, j in jids.items()}
     routes = RouteIndex(traci, net, jids)
@@ -210,11 +308,16 @@ def main():
     with open(common.INTERSECTIONS_CSV, encoding="utf-8") as f:
         all_nodes = {r["junctionId"] for r in csv.DictReader(f)}
 
-    schemes = [EtaScheme(float(tau), float(dl), junction_xy, routes)
-               for tau in a.taus.split(",") for dl in a.deltas.split(",")]
-    schemes += [DistScheme(float(r), a.period) for r in a.radii.split(",")]
+    schemes = [EtaScheme(float(tau), float(dl), junction_xy, routes, float(jd))
+               for tau in a.taus.split(",") for dl in a.deltas.split(",") for jd in a.join_dists.split(",")]
+    schemes += [DistScheme(float(r), a.search_period) for r in a.radii.split(",")]
 
-    hazards = [] if a.no_hazards else hazard_eval.load_hazards("follower")
+    if a.no_hazards:
+        hazards = []
+    elif custom:
+        hazards = hazard_candidates(net, veh_routes, jids, a.trip_seed)
+    else:
+        hazards = hazard_eval.load_hazards("follower")
     active, last_stop = [], {}
     foll = {}           # (急停止した車, 開始時刻, 後続車) -> {方式: つながった時点の距離}
     passes = {}         # junction -> [(時刻, 車)]
@@ -351,7 +454,8 @@ def main():
         log = conn_log[sc.name]
         pc = sorted(sc.peer_counts)
         dur = sorted(sc.durations + [end_t - t0 for t0 in sc.since.values()])
-        res = {"scheme": sc.name,
+        res = {"scheme": sc.name, "period": a.period if a.period is not None else 1.5, "es_count": len(jids),
+               "vehicles": len(veh_routes), "concurrent": round(veh_seconds / max(end_t, 1)),
                "peers_mean": round(sum(pc) / max(len(pc), 1), 2),
                "peers_p95": pc[int(len(pc) * .95)] if pc else 0,
                "msgs_per_veh_s": round(sum(pc) / max(veh_seconds, 1), 2),

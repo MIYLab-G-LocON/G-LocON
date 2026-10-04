@@ -1,0 +1,5 @@
+scheme,period,es_count,vehicles,concurrent,peers_mean,peers_p95,msgs_per_veh_s,setups_per_veh_min,conn_sec_median,ctrl_per_veh_min,precision,recall,met_n_es,met_connected_es,met_lead3_es,met_lead_median_es,met_n_all,met_connected_all,met_lead3_all,met_lead_median_all,hz_followers,hz_coverage,hz_gap_median
+eta_t15_d60,1.5,20,600,97,6.98,23,6.98,19.24,16.0,31.88,43.2,86.5,4102,100.0,99.9,19.5,9765,82.6,81.4,20.0,94,93.6,95.9
+dist_r100,1.5,20,600,97,5.31,17,5.31,16.93,15.0,57.65,34.7,57.3,4102,91.4,72.8,15.0,9765,91.1,70.8,15.0,94,88.3,71.9
+dist_r200,1.5,20,600,97,12.71,34,12.71,26.52,22.0,76.59,22.1,85.1,4102,99.7,93.2,25.0,9765,99.5,93.0,24.0,94,100.0,106.4
+dist_r300,1.5,20,600,97,24.11,52,24.11,36.56,31.0,96.53,13.4,95.9,4102,100.0,99.4,38.0,9765,99.9,99.1,35.0,94,100.0,106.4
