@@ -60,7 +60,7 @@ def extract_intersections():
         rows.append([common.intersection_id(lat, lon), round(lat, 6), round(lon, 6), node.getID(), len(nbrs)])
     rows.sort()
     with open(common.INTERSECTIONS_CSV, "w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f)
+        w = csv.writer(f, lineterminator="\n")
         w.writerow(["intersectionId", "lat", "lon", "junctionId", "degree"])
         w.writerows(rows)
     return rows
