@@ -37,6 +37,7 @@
     pairs / reconnect_pct / conn_per_pair
         一度でもつながった2台の組の数，そのうち2回以上つながり直した組の割合，1組あたりの接続回数
     short_pct               10秒以下で切れた接続の割合
+    noshare_pct             ルートが1か所も交わらない相手との接続の割合（別の道を走っていて近くを通っただけの相手）
     far_pct                 接続の間に一度も 50m 以内に近づかなかった接続の割合（近くをかすめただけの相手など）
     enc_n / enc_connected / enc_lead3 / enc_lead_median
         すれ違った2台（距離が初めて 30m 未満になった2台。交差点かどうかに関係なく位置だけで決める）について，
@@ -81,6 +82,7 @@ class Scheme:
         self.ctrl = 0
         self.peer_counts = []       # 毎秒・1台ごとの相手の数
         self.tp = self.conn_n = self.rel_n = 0
+        self.noshare = 0
         self.pair_times = {}        # (a,b) -> その2台がつながった回数（つなぎ直しの数え上げ）
         self.mind = {}              # (a,b) -> 今の接続の間に最も近づいた距離
         self.ended = []             # 終わった接続 [(続いた秒数, 最も近づいた距離)]
@@ -93,7 +95,7 @@ class Scheme:
                 s.add(pair(v, p))
         return s
 
-    def account(self, now, alive, relevant, xy):
+    def account(self, now, alive, relevant, xy, nodes):
         cur = self.connected()
         for p in cur:
             if p not in self.since:
@@ -101,6 +103,8 @@ class Scheme:
                 self.setups += 1
                 self.pair_times[p] = self.pair_times.get(p, 0) + 1
                 self.mind[p] = 1e9
+                if p[0] in nodes and p[1] in nodes and not (nodes[p[0]] & nodes[p[1]]):
+                    self.noshare += 1       # ルートが1か所も交わらない相手との接続
             a, b = p
             if a in xy and b in xy:
                 d = math.hypot(xy[a][0] - xy[b][0], xy[a][1] - xy[b][1])
@@ -121,7 +125,7 @@ class EtaScheme(Scheme):
     """本システム: エッジサーバ交差点への ETA < τ で参加，通過して δ 離れ遠ざかったら離脱."""
 
     def __init__(self, tau, delta, junction_xy, routes, join_dist=0.0):
-        super().__init__(f"eta_t{int(tau)}_d{int(delta)}" + (f"_j{int(join_dist)}" if join_dist > 0 else ""))
+        super().__init__(f"eta_t{int(tau)}_j{int(join_dist)}_d{int(delta)}")
         self.tau, self.delta, self.j, self.routes = tau, delta, junction_xy, routes
         self.join_dist = join_dist      # 参加円の半径 ρ: 交差点までの直線距離がこれ未満なら，ETA に関係なく参加する（0 = なし）
         self.members = {iid: set() for iid in junction_xy}
@@ -299,6 +303,8 @@ def main():
     ap.add_argument("--deltas", default="60", help="本システムの δ [m]（カンマ区切り）")
     ap.add_argument("--join-dists", default="100",
                     help="本システムの参加円の半径 ρ [m]（0=なし。カンマ区切り。既定は100）")
+    ap.add_argument("--etas", default="",
+                    help="本システムの条件を τ:ρ:δ の組で指定（例 15:100:60,30:100:60）。指定すると --taus などは使わない")
     ap.add_argument("--radii", default="100,200,300", help="従来G-LocONの検索半径 [m]（カンマ区切り。アプリの既定は200）")
     ap.add_argument("--search-period", type=float, default=5.0, help="従来G-LocONの問い合わせ間隔 [秒]（アプリの既定は5）")
     ap.add_argument("--no-hazards", action="store_true", help="急停止を起こさない")
@@ -333,8 +339,13 @@ def main():
     with open(common.INTERSECTIONS_CSV, encoding="utf-8") as f:
         all_nodes = {r["junctionId"] for r in csv.DictReader(f)}
 
-    schemes = [EtaScheme(float(tau), float(dl), junction_xy, routes, float(jd))
-               for tau in a.taus.split(",") for dl in a.deltas.split(",") for jd in a.join_dists.split(",")]
+    if a.etas:
+        # τ:ρ:δ の組をそのまま指定（1つずつ変える比較用）
+        schemes = [EtaScheme(float(t), float(d), junction_xy, routes, float(j))
+                   for t, j, d in (x.split(":") for x in a.etas.split(","))]
+    else:
+        schemes = [EtaScheme(float(tau), float(dl), junction_xy, routes, float(jd))
+                   for tau in a.taus.split(",") for dl in a.deltas.split(",") for jd in a.join_dists.split(",")]
     schemes += [DistScheme(float(r), a.search_period) for r in a.radii.split(",")]
 
     if a.no_hazards:
@@ -349,6 +360,7 @@ def main():
     last_idx = {}
     conn_log = {s.name: {} for s in schemes}     # 方式 -> pair -> [[開始, 終了]]
     veh_route = {}
+    veh_nodes = {}      # 車 -> ルートが通る交差点・曲がり角（node）の集合
 
     step_len = traci.simulation.getDeltaT()
     end_t = traci.simulation.getEndTime()
@@ -398,6 +410,7 @@ def main():
         for v in alive:
             if v not in veh_route:
                 veh_route[v] = traci.vehicle.getRoute(v)
+                veh_nodes[v] = {to_node[e][0] for e in veh_route[v]} | {net.getEdge(veh_route[v][0]).getFromNode().getID()}
             idx = traci.vehicle.getRouteIndex(v)
             li = last_idx.get(v)
             if li is not None and idx > li:
@@ -471,7 +484,7 @@ def main():
 
         for sc in schemes:
             sc.update(traci, now, alive, xy, speed)
-            sc.account(now, alive, relevant, xy)
+            sc.account(now, alive, relevant, xy, veh_nodes)
             cur = sc.connected()
             for p, closing in new_close:
                 sc.enc.append((closing, now - sc.since[p] if p in sc.since else None))
@@ -547,6 +560,7 @@ def main():
         res["reconnect_pct"] = round(100 * sum(1 for n in sc.pair_times.values() if n >= 2) / npairs, 1)
         res["conn_per_pair"] = round(sum(sc.pair_times.values()) / npairs, 2)
         res["short_pct"] = round(100 * sum(1 for d, _ in ended if d <= SHORT_SEC) / max(len(ended), 1), 1)
+        res["noshare_pct"] = round(100 * sc.noshare / max(sc.setups, 1), 1)
         res["far_pct"] = round(100 * sum(1 for _, m in ended if m > FAR_M) / max(len(ended), 1), 1)
         # すれ違い（距離が CLOSE_M 未満になった2台）: その時点でつながっていたか，何秒前からか
         for tag, sel in (("", lambda c: True), ("_fast", lambda c: c >= FAST_CLOSING)):
