@@ -213,8 +213,9 @@ def plot_metric(plt, out, summ, col, name, unit, good, ja):
                 ax.bar(xs, ys, w * 0.92, yerr=es, capsize=2, color=COLORS[si % len(COLORS)], label=lab,
                        error_kw={"elinewidth": 0.8, "ecolor": "#333333"})
                 if len(schemes) <= 4:
-                    for x, y in zip(xs, ys):
-                        ax.text(x, y, f"{y:.1f}" if y < 100 else f"{y:.0f}", ha="center", va="bottom", fontsize=7)
+                    for x, y, e in zip(xs, ys, es):       # 値は誤差の線の上に書く（線と重ならないように）
+                        ax.annotate(f"{y:.1f}" if y < 100 else f"{y:.0f}", (x, y + e), xytext=(0, 2),
+                                    textcoords="offset points", ha="center", va="bottom", fontsize=7)
             ax.set_xticks(range(len(traffics)))
             if ja:
                 ax.set_xticklabels([f"交通量 {TRAFFIC_JA.get(t, t)}" for t in traffics])
@@ -224,13 +225,15 @@ def plot_metric(plt, out, summ, col, name, unit, good, ja):
                 ax.set_xticklabels([f"traffic {t}" for t in traffics])
                 ax.set_title(f"{mp}, {nz}", fontsize=10)
             ax.set_ylim(bottom=0)
+            ax.margins(y=0.12)
             ax.grid(axis="y", linewidth=0.4, alpha=0.5)
             ax.set_axisbelow(True)
             for sp in ("top", "right"):
                 ax.spines[sp].set_visible(False)
-    axes[0][0].legend(fontsize=8, frameon=False, ncol=2)
+    handles, labels = axes[0][0].get_legend_handles_labels()
     fig.suptitle(f"{name}（{good}）" if ja else col, fontsize=12)
-    fig.tight_layout()
+    fig.tight_layout(rect=(0, 0.05, 1, 1))
+    fig.legend(handles, labels, loc="lower center", ncol=min(len(labels), 5), fontsize=9, frameon=False)   # 凡例は図の下（棒と重ならないように）
     fig.savefig(os.path.join(out, f"fig_{col}.png"), dpi=160)
     plt.close(fig)
 
