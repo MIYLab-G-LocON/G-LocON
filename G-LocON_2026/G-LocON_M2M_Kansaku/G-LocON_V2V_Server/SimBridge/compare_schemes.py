@@ -386,7 +386,7 @@ def main():
     ap.add_argument("--gps-corr", type=float, default=0.0,
                     help="測位誤差が続く時間 [秒]（0 = 毎秒ばらばら。大きいほどゆっくり変わる）")
     ap.add_argument("--speed-wobble", type=float, default=0.0,
-                    help="1台の中での速度のゆらぎ（希望速度に対する標準偏差の割合。0.1 = ±10%ほど）")
+                    help="1台の中での速度のゆらぎ（希望速度に対する標準偏差の割合。0.1 = ±10%%ほど）")
     ap.add_argument("--wobble-corr", type=float, default=10.0, help="速度のゆらぎが続く時間 [秒]")
     ap.add_argument("--period", type=float, default=None, help="車両の発生間隔 [秒]（指定すると交通流をその場で作る）")
     ap.add_argument("--min-distance", type=float, default=800, help="出発地と目的地の最小距離 [m]（--period のとき）")
