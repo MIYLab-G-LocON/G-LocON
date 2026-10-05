@@ -71,6 +71,8 @@ APPROACH_SIDE_M = 12.0    # 危険地点が自分のルートの線からこの�
 APPROACH_ANGLE_DEG = 60.0 # 危険車両の向きと，その地点での自分のルートの向きの差がこれ以内なら同じ方向
 APPROACH_MAX_M = 400.0    # これより先の危険地点は対象外
 PENDING_MAX_SEC = 15.0    # 表示の色替えを待つ最大時間（止まった車などで尻尾が円から出ない場合）
+COLOR_STOPPED = (0, 0, 0)          # sumo-gui: 急停止中の車（黒。赤い円で囲む）
+COLOR_SLOWING = (140, 80, 20)      # sumo-gui: 危険情報を受けて減速中の車（茶色。減速を始めたときにオレンジの円）
 PALETTE = [(230, 25, 75), (60, 180, 75), (255, 225, 25), (0, 130, 200), (245, 130, 48),
            (145, 30, 180), (70, 240, 240), (240, 50, 230), (210, 245, 60), (0, 128, 128)]
 
@@ -164,6 +166,7 @@ class Bridge:
         # LEAVE（車の中心で判定）した時点では描かれた車の後ろがまだ離脱円の中に見える。
         # 表示だけ，描かれた車の後端が円を出るまで色替えを待つ（LEAVEの送信・記録のタイミングは変えない）
         self.pending_color = {}
+        self.base_col = {}                  # 車 -> グループの色（急停止・減速の色を戻すときに使う）
         self.exaggeration = common.gui_vehicle_exaggeration() if a.gui else 1.0
         self.stats = {"join_sent": 0, "join_replied": 0, "join_rtt": [], "leave_sent": 0,
                       "peer_left_rx": 0, "nat_register_rx": 0, "check": 0, "match": 0,
@@ -460,6 +463,8 @@ class Bridge:
             self.stopping.append({"veh": v, "until": now + h["stop_sec"] + spd / h["decel"],
                                   "iid": h["intersectionId"], "hid": hid, "t0": now})
             self.ctl["stops"] += 1
+            self.apply_color(v)
+            self.ping(v, (255, 0, 0), h["stop_sec"] + spd / h["decel"], 1)
             self.hlog(h["intersectionId"], v, "SUDDEN_STOP", "", f"speed={spd:.1f},dist={d:.1f}")
             if self.a.control == "system":
                 self.set_hazard(v, {"id": hid, "intersectionId": h["intersectionId"], "active": True})
@@ -472,6 +477,7 @@ class Bridge:
                 t.vehicle.setSpeed(v, -1)
                 t.vehicle.setDecel(v, 3.0)
                 self.stopping.remove(s)
+                self.apply_color(v)
                 self.hlog(s["iid"], v, "RESUME_HAZARD")
                 if self.a.control == "system":
                     self.set_hazard(v, {"id": s["hid"], "intersectionId": s["iid"], "active": False})
@@ -502,6 +508,8 @@ class Bridge:
         if command == "DECELERATE":
             if w is None:
                 w = self.warned[vid] = {"orig": self.t.vehicle.getMaxSpeed(vid), "hazards": {}}
+                self.apply_color(vid)
+                self.ping(vid, (255, 140, 0), 3.0, 2)
             if hid not in w["hazards"]:
                 self.ctl["decel"] += 1
                 self.hlog("", hid.split("@")[0], "DECELERATE", vid,
@@ -525,6 +533,7 @@ class Bridge:
             else:
                 self.t.vehicle.setMaxSpeed(vid, w["orig"])
                 del self.warned[vid]
+                self.apply_color(vid)
                 self.hlog("", "", "RESUME", vid)
 
     def mark_phone(self, vid, ph):
@@ -573,8 +582,30 @@ class Bridge:
             col = (160, 160, 160)
         else:
             col = PALETTE[self.es_index.get(kind, 0) % len(PALETTE)]
+        self.base_col[vid] = col
+        self.apply_color(vid)
+
+    def apply_color(self, vid):
+        """車の色を塗る。急停止中は黒，危険情報を受けて減速中は茶色，それ以外はグループの色（表示のみ）."""
+        if not self.a.gui or vid not in self.alive:
+            return
+        if any(s["veh"] == vid for s in self.stopping):
+            col = COLOR_STOPPED
+        elif vid in self.warned:
+            col = COLOR_SLOWING
+        else:
+            col = self.base_col.get(vid, (160, 160, 160))
         try:
             self.t.vehicle.setColor(vid, col + (255,))
+        except Exception:
+            pass
+
+    def ping(self, vid, col, sec, kind):
+        """車を一定時間，円で囲んで目立たせる（急停止 = 赤，減速開始 = オレンジ。表示のみ）."""
+        if not self.a.gui or vid not in self.alive:
+            return
+        try:
+            self.t.vehicle.highlight(vid, col + (255,), 30, 255, max(sec, 1.0), kind)
         except Exception:
             pass
 
