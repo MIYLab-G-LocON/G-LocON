@@ -27,7 +27,8 @@
     msgs_per_veh_s          位置情報の送信数（1台1秒あたり。相手1台につき毎秒1通）
     setups_per_veh_min      新しく相手とつながった回数（1台1分あたり）。多いほどつなぎ直しが多い
     conn_sec_median         1回の接続が続いた時間（中央値）
-    ctrl_per_veh_min        サーバとの制御メッセージ数（1台1分あたり。数え方は count_control を参照）
+    ctrl_per_veh_min        サーバとの制御メッセージ数（1台1分あたり）。本システム: MasterServer への問い合わせ，JOIN・LEAVE と
+                            その通知，参加中の接続維持（15秒ごと。2026/10/05 から数える）。従来: 問い合わせと新しい相手の接続依頼
     precision               つながっている相手のうち，関係のある相手の割合
     recall                  関係のある相手のうち，つながっている割合
         「関係のある相手」= この先 H 秒（既定10秒）以内に同じ交差点に入る車，または 100m 以内の前後の車
@@ -89,6 +90,7 @@ SHORT_SEC = 10.0            # この秒数以下で切れた接続を「短い�
 REACT_SEC = 4.1
 DECEL_INFO = 2.0
 APPROACH_WINDOW = 15.0
+KEEPALIVE_SEC = 15.0         # アプリと同じ: 参加中のエッジサーバへ接続維持のパケットを送る間隔 [秒]
 PASS_RADIUS_M = 20.0        # アプリと同じ: 交差点にこの距離まで近づいたら「通過済み」とする
 FLAP_CHANGE_M = 50.0        # つなぎ直し A（境目の出入り）: 切れてから SHORT_SEC 以内に，2台の距離の変化がこれ未満のままつながり直した
 NEAR_ES_M = 100.0           # エッジサーバ交差点からこの距離以内を「交差点の近く」とする
@@ -223,6 +225,8 @@ class EtaScheme(Scheme):
                 if d / max(speed[v], 1.0) < self.tau or eu < self.join_dist:
                     self.ctrl += 2 + len(mem)  # JOIN + メンバー一覧の返信 + 既存メンバーへの参加通知
                     mem.add(v)
+        # 接続維持（KEEPALIVE）: 参加中のグループ1つにつき，車がエッジサーバへ15秒ごとに1通送る（アプリと同じ）
+        self.ctrl += sum(len(mem) for mem in self.members.values()) / KEEPALIVE_SEC
         self.peers = {}
         for mem in self.members.values():
             for v in mem:
