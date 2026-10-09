@@ -27,7 +27,7 @@ public class P2P implements UDPHolePunchingFinish,IReceive{
     private ArrayList<UserInfo> peripheralUserInfos;
     //private UserInfo myUserInfo;
     private String localIP;
-    private final String peerID = "555";
+    private final String peerID = Main.peerID; // [修正 2026/10] Mainと同じpeerID（起動引数で変更可能）を使う
     //private String peerID;
     //private HubenyDistance hubenyDistance;
     //private double speed;
@@ -252,6 +252,22 @@ public class P2P implements UDPHolePunchingFinish,IReceive{
         try {
             for(NetworkInterface n: Collections.list(NetworkInterface.getNetworkInterfaces()) ) {
                 if (!n.getDisplayName().contains(LAN)) continue; // 追加
+                for (InetAddress addr : Collections.list(n.getInetAddresses()))  {
+                    if( addr instanceof Inet4Address && !addr.isLoopbackAddress() ){
+                        privateIP = addr.getHostAddress();
+                        return privateIP;
+                    }
+                }
+            }
+        } catch (SocketException e) {
+            e.printStackTrace();
+        }
+
+        // [修正 2026/10] 表示名に"Wi-Fi"を含むNICはWindowsにしか無く，Linux/macではprivateIPがnullになっていた．
+        // 見つからない場合は，起動中でループバック以外の最初のIPv4アドレスを使う
+        try {
+            for(NetworkInterface n: Collections.list(NetworkInterface.getNetworkInterfaces()) ) {
+                if (!n.isUp() || n.isLoopback()) continue;
                 for (InetAddress addr : Collections.list(n.getInetAddresses()))  {
                     if( addr instanceof Inet4Address && !addr.isLoopbackAddress() ){
                         privateIP = addr.getHostAddress();

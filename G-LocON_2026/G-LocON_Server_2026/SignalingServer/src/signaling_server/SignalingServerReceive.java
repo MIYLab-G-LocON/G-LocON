@@ -3,6 +3,7 @@ package signaling_server;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.util.ArrayList;
+import java.util.Objects;
 
 import org.json.JSONObject;
 
@@ -31,7 +32,8 @@ public class SignalingServerReceive extends Thread {
 
 		while (true) {
 			// receive Data
-			DatagramPacket receivePacket = new DatagramPacket(new byte[1024], 1024);
+			// [修正 2026/10] 1024バイトではSEARCH結果（ユーザ6人程度）が収まらないため，UDPの最大ペイロード長にする
+			DatagramPacket receivePacket = new DatagramPacket(new byte[65507], 65507);
 			try {
 				socket.receive(receivePacket);
 
@@ -42,9 +44,10 @@ public class SignalingServerReceive extends Thread {
 				String processType = processJSONObject.getProcessType();
 
 				if (processType.equals(REGISTER)) { //登録
-					onRegister(processJSONObject.getUserInfo());
-					System.out.println(processJSONObject.getUserInfo().getPeerId() + "の端末情報を登録");
-					showInfo(processJSONObject.getUserInfo(), REGISTER);
+					if (onRegister(processJSONObject.getUserInfo())) { // [修正 2026/10] 不正な登録は無視する
+						System.out.println(processJSONObject.getUserInfo().getPeerId() + "の端末情報を登録");
+						showInfo(processJSONObject.getUserInfo(), REGISTER);
+					}
 				}
 
 				else if (processType.equals(UPDATE)) { //更新
@@ -62,7 +65,9 @@ public class SignalingServerReceive extends Thread {
 
 				}
 			} catch (Exception e) {
-
+				// [修正 2026/10] 例外を握りつぶすと原因が分からないため，ログを出して受信を続ける
+				System.out.println("SignalingServerReceive:受信データの処理に失敗：" + e);
+				e.printStackTrace();
 			}
 		}
 	}
@@ -71,10 +76,35 @@ public class SignalingServerReceive extends Thread {
 	 * ユーザ情報登録
 	 * @param userInfo
 	 */
-	public void onRegister(UserInfo userInfo) {
+	public boolean onRegister(UserInfo userInfo) {
+		// [修正 2026/10] peerIDが無い登録は識別できないため，ログを出して無視する
+		if (userInfo.getPeerId() == null || userInfo.getPeerId().isEmpty()) {
+			System.out.println("REGISTER:peerIDが無いため登録しない（publicIP:" + userInfo.getPublicIP()
+					+ " publicPort:" + userInfo.getPublicPort() + "）");
+			return false;
+		}
+		// [修正 2026/10] アプリ再起動等で同じpeerIDが再登録された場合，古い情報を置き換える
+		// （以前は追加し続けたため，古いエントリがSEARCH結果に残っていた）
+		for (int i = 0; i < userInfoList.size(); i++) {
+			if (userInfo.getPeerId().equals(userInfoList.get(i).getPeerId())) {
+				userInfoList.set(i, userInfo);
+				System.out.println("REGISTER:同じpeerIDの情報を置き換え．現在のuserInfosのサイズ"+userInfoList.size());
+				return true;
+			}
+		}
 		userInfoList.add(userInfo);
 		System.out.println("REGISTER:現在のuserInfosのサイズ"+userInfoList.size());
 		//System.out.println(userInfo);
+		return true;
+	}
+
+	/**
+	 * [修正 2026/10] 2つのユーザ情報のアドレス（public/privateのIPとポート）が一致するか
+	 * privateIP等がnullでもNullPointerExceptionにならないようObjects.equalsで比較する
+	 */
+	private boolean isSameAddress(UserInfo a, UserInfo b) {
+		return Objects.equals(a.getPublicIP(), b.getPublicIP()) && a.getPublicPort() == b.getPublicPort()
+				&& Objects.equals(a.getPrivateIP(), b.getPrivateIP()) && a.getPrivatePort() == b.getPrivatePort();
 	}
 
 	/**
@@ -92,8 +122,8 @@ public class SignalingServerReceive extends Thread {
 		}
 		*/
 	       for(int i = 0; i < userInfoList.size(); i++){
-	            if(userInfo.getPublicIP().equals(userInfo.getPublicIP()) && userInfoList.get(i).getPublicPort() == userInfo.getPublicPort() &&
-	                    userInfoList.get(i).getPrivateIP().equals(userInfo.getPrivateIP()) && userInfoList.get(i).getPrivatePort() == userInfo.getPrivatePort()) {
+	            // [修正 2026/10] 以前はuserInfo自身とpublicIPを比較しており常にtrueだった．リスト側の要素と比較する
+	            if(isSameAddress(userInfoList.get(i), userInfo)) {
 	                userInfoList.set(i, userInfo);
 	                break;
 	            }
@@ -142,10 +172,9 @@ public class SignalingServerReceive extends Thread {
 			if(distance <= searchDistance) {
 				// if(item.getPeerId() == myPeerId)に置き換える予定
 				// 自分自身を検索結果から除外
-				if (item.getPublicIP().equals(userInfo.getPublicIP())
-						&& item.getPublicPort() == userInfo.getPublicPort()
-						&& item.getPrivateIP().equals(userInfo.getPrivateIP())
-						&& item.getPrivatePort() == userInfo.getPrivatePort()) {
+				// [修正 2026/10] privateIPがnullでも落ちないよう比較をnull安全にし，同じpeerIDも自分自身として除外する
+				if (isSameAddress(item, userInfo)
+						|| (userInfo.getPeerId() != null && userInfo.getPeerId().equals(item.getPeerId()))) {
 				}else {
 
 					System.out.println(userInfo.getPeerId()+"の緯度は"+userInfo.getLatitude()+"  経度は"+userInfo.getLongitude());
@@ -185,8 +214,7 @@ public class SignalingServerReceive extends Thread {
 		}
 		*/
         for(int i = 0; i < userInfoList.size(); i++){
-            if(userInfoList.get(i).getPublicIP().equals(userInfo.getPublicIP()) && userInfoList.get(i).getPublicPort() == userInfo.getPublicPort() &&
-                    userInfoList.get(i).getPrivateIP().equals(userInfo.getPrivateIP()) && userInfoList.get(i).getPrivatePort() == userInfo.getPrivatePort()) {
+            if(isSameAddress(userInfoList.get(i), userInfo)) { // [修正 2026/10] null安全な比較に変更
                 userInfoList.remove(i);
                 break;
             }

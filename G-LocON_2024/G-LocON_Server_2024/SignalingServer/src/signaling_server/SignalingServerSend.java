@@ -38,18 +38,20 @@ public class SignalingServerSend extends Thread {
         if(replyData.equals("srcAddrPortRegisterToNat")){
             ProcessJSONObject processJSONObject = new ProcessJSONObject();
             JSONObject jsonObject = processJSONObject.getSrcUserInfo(userInfo);
-            try {
-                byte[] sendData = jsonObject.toString().getBytes();
-                DatagramPacket sendPacket;
-                for(UserInfo item : userInfoList) {
+            byte[] sendData = jsonObject.toString().getBytes();
+            DatagramPacket sendPacket;
+            for(UserInfo item : userInfoList) {
+                // [修正 2026/10] tryをループの内側へ移動．1件の宛先が不正（port 0等）でも残りのユーザへ送信を続ける
+                try {
+                	// [修正 2026/10] 宛先はpublicIPなのでポートもpublicPortを使う（以前はprivatePortでNAT越しに届かなかった）
                 	sendPacket = new DatagramPacket(sendData,sendData.length,
-                			InetAddress.getByName(item.getPublicIP()), item.getPrivatePort());
+                			InetAddress.getByName(item.getPublicIP()), item.getPublicPort());
                 	socket.send(sendPacket);
                 	System.out.println("srcAddrPortRegisterToNat-----該当範囲ユーザへの"+userInfo.getPeerId()+"(自端末)情報の送信完了");
+                } catch (Exception e) {
+                	System.out.println("srcAddrPortRegisterToNat-----" + item.getPeerId() + "への送信失敗：" + e);
                 }
-            } catch (Exception e) {
-				e.printStackTrace();
-			}
+            }
         }
         /**
          * replyFromMainActivityの場合

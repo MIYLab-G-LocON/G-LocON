@@ -26,7 +26,8 @@ public class Receive extends Thread{
         final String DELAY_EXPERIMENT = "DelayExperiment";
         //final String SEND_DATA = "sendLocation";
         do {
-            DatagramPacket receivePacket = new DatagramPacket(new byte[1024], 1024);
+            // [修正 2026/10] 1024バイトでは周辺ユーザ一覧（6人程度以上）が収まらないため，UDPの最大ペイロード長にする
+            DatagramPacket receivePacket = new DatagramPacket(new byte[65507], 65507);
             try {
                 System.out.println("P2P:P2Pレシーブ起動直前");
                 socket.receive(receivePacket);

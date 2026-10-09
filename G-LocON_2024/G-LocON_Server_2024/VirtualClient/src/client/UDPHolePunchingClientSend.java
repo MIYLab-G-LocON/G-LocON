@@ -10,6 +10,7 @@ import java.net.InetAddress;
  */
 
 public class UDPHolePunchingClientSend extends Thread{
+    // [修正 2026/10] ★STUNサーバのIPアドレス．サーバを別のPCで動かす場合はここを変更する
     final static String STUN_SERVER_DOMAIN = "127.0.0.1";
     final static int STUN_SERVER_PORT = 55554;
     private DatagramSocket clientSocket;

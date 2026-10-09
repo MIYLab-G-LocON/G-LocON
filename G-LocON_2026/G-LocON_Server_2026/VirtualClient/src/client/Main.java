@@ -11,13 +11,18 @@ public class Main implements IP2P,DummyLocationListener{
     private int getLocationUpdateCount = 4;//位置情報のカウント回数を記録 5回で初期化
     private int LocationCounter = 0;
     private DummyLocation dummyLocation;
-    private static String peerID = "555";
+    // [修正 2026/10] サーバはpeerIDで端末を区別する（同じpeerIDの再登録は上書き）ため，
+    // 仮想端末を複数起動する場合は起動引数で別々のpeerIDを指定する（例: java client.Main 556）
+    static String peerID = "555";
     //private static double speed;
 
 
     private static P2P p2p;
 
 	public static void main(String args[]){
+		if (args.length > 0) {
+			peerID = args[0]; // [修正 2026/10] 起動引数でpeerIDを指定可能にした
+		}
 		Main main  = new Main();
 		//ここにforループを記述したら複数の仮想端末生成できそう？(11/13)
 		p2p = new P2P(main);

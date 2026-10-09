@@ -42,7 +42,8 @@ public class ProcessJSONObject {
         try {
             userInfo.setPublicIP(jsonObject.getString("publicIP"));
             userInfo.setPublicPort(jsonObject.getInt("publicPort"));
-            userInfo.setPrivateIP(jsonObject.getString("privateIP"));
+            // [修正 2026/10] privateIPが無い（端末側で取得失敗しnull）と例外になり，以降のpeerID等が読まれなかった．無ければnullとして続行する
+            userInfo.setPrivateIP(jsonObject.optString("privateIP", null));
             userInfo.setPrivatePort(jsonObject.getInt("privatePort"));
             userInfo.setLatitude(jsonObject.getDouble("latitude"));
             userInfo.setLongitude(jsonObject.getDouble("longitude"));

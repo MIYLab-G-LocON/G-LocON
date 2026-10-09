@@ -61,23 +61,25 @@ public class STUNServerReceive extends Thread {
 		InetAddress IPAddress = datagramPacket.getAddress(); //アドレス取得
 		int port = datagramPacket.getPort(); //ポート番号取得
 
-		userInfo.setIPAddress(IPAddress);
-		userInfo.setPort(port);
+		// [修正 2026/10] 共有のuserInfoを書き換えると，ほぼ同時に2台から"Hello"が届いた場合に
+		// 送信スレッドが後から届いた端末の宛先を読んでしまい，返信先が入れ替わる（片方は永久に待つ）．
+		// 受信パケットごとに新しいUserInfoを生成し，そのパケットの送信元へ返信する．
+		UserInfo packetUserInfo = new UserInfo(IPAddress, port);
 
 		//userInfo表示
-		userInfo.printInfo();
+		packetUserInfo.printInfo();
 
-		onSendeMsg();
+		onSendeMsg(packetUserInfo);
 	}
 
 
 	/*
 	 * ServerSend生成
 	 */
-	public void onSendeMsg() {
+	public void onSendeMsg(UserInfo packetUserInfo) { // [修正 2026/10] 返信先をパケットごとに受け取る
 
 		//送信用スタンサーバ生成
-		STUNServerSend stunServerSend = new STUNServerSend(datagramSocket, userInfo);
+		STUNServerSend stunServerSend = new STUNServerSend(datagramSocket, packetUserInfo);
 		stunServerSend.start();
 	}
 

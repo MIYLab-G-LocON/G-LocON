@@ -13,6 +13,7 @@ import org.json.JSONObject;
  */
 
 public class SendToSignalingServer extends Thread{
+    // [修正 2026/10] ★シグナリングサーバのIPアドレス．サーバを別のPCで動かす場合はここを変更する
     private final static String SIGNALING_SERVER_IP = "127.0.0.1";
     final static int SIGNALING_SERVER_PORT = 55555;
     private String processType;
