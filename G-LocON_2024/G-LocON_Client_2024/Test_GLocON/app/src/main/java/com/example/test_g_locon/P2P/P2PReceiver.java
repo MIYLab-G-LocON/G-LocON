@@ -28,7 +28,8 @@ public class P2PReceiver extends AsyncTask<String, String, Void> {
         final String DO_UDP_HOLE_PUNCHING = "doUDPHolePunching";
         final String SEND_DATA = "SendLocation";
         final String ACK = "Ack";
-        DatagramPacket receivePacket = new DatagramPacket(new byte[1024], 1024);
+        // [修正 2026/10] 1024バイトでは周辺ユーザ一覧（6人程度）が収まらないため，UDPの最大ペイロード長にする
+        DatagramPacket receivePacket = new DatagramPacket(new byte[65507], 65507);
         do {
 
 
@@ -73,7 +74,7 @@ public class P2PReceiver extends AsyncTask<String, String, Void> {
                 }
                 */
 
-            } catch (JSONException e) {
+            } catch (Exception e) { // [修正 2026/10] JSON以外の例外で受信スレッドが落ちる（アプリ終了）のを防ぐ
                 Log.d("P2P", "エラー:"+e);
             }
 

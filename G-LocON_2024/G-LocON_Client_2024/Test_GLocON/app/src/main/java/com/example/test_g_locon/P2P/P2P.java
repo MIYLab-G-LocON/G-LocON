@@ -14,12 +14,14 @@ import java.net.DatagramSocket;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.Executors;
 
 public class P2P implements IP2PReceiver{
     private IP2P iP2P;
     private DatagramSocket socket;
     private UserInfo myUserInfo;
-    private ArrayList<UserInfo> peripheralUsers; //周辺ユーザ情報
+    // [修正 2026/10] 受信スレッドと送信スレッドで共有するためvolatileにし，変更時は新しいリストに差し替える（コピーオンライト）
+    private volatile ArrayList<UserInfo> peripheralUsers; //周辺ユーザ情報
     private OutputToCSV sendFileInput; //sendデータをCSVに書き込み
     private OutputToCSV receiveFileInput; //receiveデータをCSVに書き込み
     private List<MemoryToSendData> sendMemory; //sendデータを記録
@@ -67,7 +69,8 @@ public class P2P implements IP2PReceiver{
      */
     public void p2pReceiverStart() {
         P2PReceiver p2pReceiver = new P2PReceiver(socket, this);
-        p2pReceiver.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+        // [修正 2026/10] 無限ループの受信処理は専用スレッドで実行する（共有スレッドプールを占有して他の送信が動かなくなるのを防ぐ）
+        p2pReceiver.executeOnExecutor(Executors.newSingleThreadExecutor());
     }
 
 
@@ -98,6 +101,12 @@ public class P2P implements IP2PReceiver{
         eSignalingProcess = ESignalingProcess.DELETE;
         Signaling signaling = new Signaling(socket, myUserInfo, eSignalingProcess);
         signaling.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+    }
+
+    // [修正 2026/10] 終了時用：DELETEを呼び出し元スレッドで同期送信する（バックグラウンドスレッドから呼ぶこと）
+    public void signalingDeleteSync() {
+        Signaling signaling = new Signaling(socket, myUserInfo, ESignalingProcess.DELETE);
+        signaling.doInBackground();
     }
     /**************SignalingServerへの接続系**************************/
 
@@ -155,13 +164,17 @@ public class P2P implements IP2PReceiver{
     public void onDoUDPHolePunching(UserInfo srcUserInfo) {
         natRegisterSrcUser(srcUserInfo);
 
-        for (int i = 0; i < peripheralUsers.size(); i++) {
-            if (srcUserInfo.getPublicIP().equals(peripheralUsers.get(i).getPublicIP()) && srcUserInfo.getPublicPort() == peripheralUsers.get(i).getPublicPort() &&
-                    srcUserInfo.getPrivateIP().equals(peripheralUsers.get(i).getPrivateIP()) && srcUserInfo.getPrivatePort() == peripheralUsers.get(i).getPrivatePort()) {
+        ArrayList<UserInfo> users = peripheralUsers; // [修正 2026/10] 参照を1回だけ読む
+        for (int i = 0; i < users.size(); i++) {
+            if (srcUserInfo.getPublicIP().equals(users.get(i).getPublicIP()) && srcUserInfo.getPublicPort() == users.get(i).getPublicPort() &&
+                    srcUserInfo.getPrivateIP().equals(users.get(i).getPrivateIP()) && srcUserInfo.getPrivatePort() == users.get(i).getPrivatePort()) {
                 return;
             }
         }
-        peripheralUsers.add(srcUserInfo);
+        // [修正 2026/10] 送信スレッドが走査中のリストを直接変更しないよう，コピーに追加して差し替える
+        ArrayList<UserInfo> newUsers = new ArrayList<>(users);
+        newUsers.add(srcUserInfo);
+        peripheralUsers = newUsers;
     }
 
 
@@ -177,6 +190,7 @@ public class P2P implements IP2PReceiver{
      */
     @Override
     public void onGetPeripheralUserLocation(int locationUpdateCount, String srcIP, int srcPort, Location location, String peerId, double speed) {
+        ArrayList<UserInfo> peripheralUsers = this.peripheralUsers; // [修正 2026/10] 処理中に差し替えられても同じリストを使う
         for (int i = 0; i < peripheralUsers.size(); i++) {
             if (srcIP.equals(peripheralUsers.get(i).getPublicIP()) && srcPort == peripheralUsers.get(i).getPublicPort()) {
                 peripheralUsers.get(i).setLatitude(location.getLatitude());
@@ -239,7 +253,7 @@ public class P2P implements IP2PReceiver{
         SetDate d = new SetDate();
         sendTime = d.convertLong(System.currentTimeMillis());
 
-
+        ArrayList<UserInfo> peripheralUsers = this.peripheralUsers; // [修正 2026/10] 処理中に差し替えられても同じリストを使う
         for (int i = 0; i < peripheralUsers.size(); i++) {
             if (!peripheralUsers.get(i).getPublicIP().equals(myUserInfo.getPublicIP())) {
                 MemoryToSendData mtsd = new MemoryToSendData(String.valueOf(locationUpdateCount), peripheralUsers.get(i).getPublicIP(), String.valueOf(peripheralUsers.get(i).getPublicPort()), sendTime);

@@ -12,6 +12,9 @@ import java.net.InetAddress;
 public class STUNServerClientSender extends AsyncTask<String, String, Integer> {
     private DatagramSocket socket;
     ISTUNServerClientSender istunServerClientSender;
+    // [修正 2026/10] STUNサーバから返信を受け取ったかどうか（受信スレッドから書き込まれる）
+    private volatile boolean receivedReply = false;
+    private boolean receiverStarted = false;
 
     STUNServerClientSender(DatagramSocket socket,ISTUNServerClientSender istunServerClientSender){
         this.socket = socket;
@@ -20,6 +23,11 @@ public class STUNServerClientSender extends AsyncTask<String, String, Integer> {
 
     @Override
     protected void onPreExecute() {
+    }
+
+    // [修正 2026/10] STUNサーバから返信を受け取ったら呼ぶ（Helloの再送を止める）
+    void onReceivedReply() {
+        receivedReply = true;
     }
 
     @Override
@@ -38,13 +46,27 @@ public class STUNServerClientSender extends AsyncTask<String, String, Integer> {
                 Log.d("STUN_DEBUG", "送信前: " + sendMsg + " → " + stunServerIP + ":" + stunServerPort);
                 socket.send(sendPacket);
                 Log.d("STUN_DEBUG", "送信完了: " + sendMsg);
+                // [修正 2026/10] Helloの返信が失われると先に進めないため，返信が来るまで2秒ごとにHelloを再送する
                 if(sendMsg.equals("Hello")){
-                    sendMsg = "Ping";
-                    istunServerClientSender.onSendFinishMsgToStun();
+                    if (!receiverStarted) {
+                        receiverStarted = true;
+                        istunServerClientSender.onSendFinishMsgToStun();
+                    }
+                    if (waitReply(2000)) {
+                        sendMsg = "Ping";
+                    } else {
+                        continue;
+                    }
                 }
                 sleep();
             } catch (Exception e) {
                 Log.d("STUN_DEBUG", "エラー: " + e);
+                // [修正 2026/10] 送信失敗時に間隔を空けずに再試行し続けるのを防ぐ
+                try {
+                    Thread.sleep(2000);
+                } catch (InterruptedException ie) {
+                    ie.printStackTrace();
+                }
             }
         }
     }
@@ -54,6 +76,19 @@ public class STUNServerClientSender extends AsyncTask<String, String, Integer> {
 
     }
 
+
+    // [修正 2026/10] 最大timeoutミリ秒，返信を待つ。返信があればtrue
+    private boolean waitReply(long timeout) {
+        long end = System.currentTimeMillis() + timeout;
+        while (!receivedReply && System.currentTimeMillis() < end) {
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+        return receivedReply;
+    }
 
     private void sleep(){
         try {

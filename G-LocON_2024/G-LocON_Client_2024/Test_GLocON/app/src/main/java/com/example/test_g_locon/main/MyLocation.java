@@ -76,7 +76,9 @@ public class MyLocation implements GoogleApiClient.ConnectionCallbacks, GoogleAp
         locationRequest.setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY);
 
         // 設定したLocationRequestで位置情報の更新を開始
-        if (context.getPackageManager().checkPermission(Manifest.permission.ACCESS_FINE_LOCATION, context.getPackageName()) == PackageManager.PERMISSION_GRANTED) {
+        // [修正 2026/10] 「おおよその位置情報」(COARSE)のみ許可された端末でも位置更新を開始する（FINEのみだと何も起きないため）
+        if (context.getPackageManager().checkPermission(Manifest.permission.ACCESS_FINE_LOCATION, context.getPackageName()) == PackageManager.PERMISSION_GRANTED
+                || context.getPackageManager().checkPermission(Manifest.permission.ACCESS_COARSE_LOCATION, context.getPackageName()) == PackageManager.PERMISSION_GRANTED) {
             // 設定したLocationRequestで位置情報の更新を開始
             LocationServices.FusedLocationApi.requestLocationUpdates(googleApiClient, locationRequest, locationListener);
         }

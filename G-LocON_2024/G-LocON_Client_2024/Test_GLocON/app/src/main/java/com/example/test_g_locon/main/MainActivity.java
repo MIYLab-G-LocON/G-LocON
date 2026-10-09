@@ -79,6 +79,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     final private boolean USE_VIRTUAL_POSITION = false; // TODO: 仮想位置を使用する場合はtrue。
     final private double initialLatitude = 0.0; // TODO: 仮想位置の緯度を設定。
     final private double initialLongitude = 0.0; // TODO: 仮想位置の経度を設定。
+    private boolean firstLocation = true; // [修正 2026/10] 初回の位置情報かどうか（速度計算用）
 
 
     @Override
@@ -127,6 +128,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
             peerId.setVisibility(View.INVISIBLE);
             start.setVisibility(View.VISIBLE);
+            start.setEnabled(false); // [修正 2026/10] 二重押しでSTUN/P2P処理が二重に起動するのを防ぐ
             end.setVisibility(View.VISIBLE);
 /**/
             plus.setOnClickListener(this);
@@ -145,7 +147,18 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             //p2p.fileInputMemorySendData();
             //p2p.fileInputMemoryReceiveData();
             //p2p.signalingDelete();
-            System.exit(1);
+            // [修正 2026/10] シグナリングサーバにDELETEを送ってから終了する（通信のためバックグラウンドで実行）
+            end.setEnabled(false);
+            final P2P endP2P = p2p;
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    if (endP2P != null) {
+                        endP2P.signalingDeleteSync();
+                    }
+                    System.exit(1);
+                }
+            }).start();
 
         } else if (v.getId() == R.id.plus) {
             cameraLevel += 1f;
@@ -167,7 +180,12 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
     @Override
     public void onMapReady(GoogleMap googleMap) {
+        // [修正 2026/10] 権限の有無に関係なく地図は使えるようにする（権限が無いとmMapがnullのままになりマーカー等が表示されない）
+        mMap = googleMap;
+        mMap.setOnMarkerClickListener(this);
         if (ActivityCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            // [修正 2026/10] 権限が無い場合は何も起きないため，設定画面で許可するよう表示する
+            displayToast("位置情報の権限がありません。設定アプリで許可してから再起動してください");
             // TODO: Consider calling
             //    ActivityCompat#requestPermissions
             // here to request the missing permissions, and then overriding
@@ -177,15 +195,17 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             // for ActivityCompat#requestPermissions for more details.
             return;
         }
-        mMap = googleMap;
         mMap.setMyLocationEnabled(true);
-        mMap.setOnMarkerClickListener(this);
     }
 
     @Override
     public boolean onMarkerClick(@NonNull Marker marker) {
         String tapPeerID = null;
         UserInfo tapPeer = null;
+        // [修正 2026/10] P2P開始前やマーカーが見つからない場合に落ちないようにする
+        if (p2p == null) {
+            return false;
+        }
         for (MarkerInfo info : markerList) {
             if (marker.equals(info.getMarker())) {
                 tapPeerID = info.getPeerId();
@@ -193,11 +213,19 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             }
         }
 
-        for(int i = 0; i < p2p.getPeripheralUsers().size(); i++){
-            if(tapPeerID.equals(p2p.getPeripheralUsers().get(i).getPeerId())){
-                tapPeer = p2p.getPeripheralUsers().get(i);
+        if (tapPeerID == null) {
+            return false;
+        }
+
+        ArrayList<UserInfo> users = p2p.getPeripheralUsers(); // [修正 2026/10] 途中で差し替えられても同じリストを使う
+        for(int i = 0; i < users.size(); i++){
+            if(tapPeerID.equals(users.get(i).getPeerId())){
+                tapPeer = users.get(i);
                 break;
             }
+        }
+        if (tapPeer == null) {
+            return false;
         }
 
         String msg = "name:" +tapPeer.getPeerId()
@@ -212,6 +240,11 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
     @Override
     public void onLocationChanged(Location geo) {
+        // [修正 2026/10] 初回は前回位置が初期値(0,0)のため速度・方角が異常値になる。初回は今回の位置を前回位置とする
+        if (firstLocation) {
+            firstLocation = false;
+            if (!USE_VIRTUAL_POSITION) mLocation = geo;
+        }
         double nowAngle = new HeadUp(mLocation.getLatitude(), mLocation.getLongitude(), geo.getLatitude(), geo.getLongitude()).getNowAngle();
         //m/sをkm/hに変換
         nowSpeed = (new HubenyDistance().calcDistance(mLocation.getLatitude(), mLocation.getLongitude(), geo.getLatitude(), geo.getLongitude())) * 3.6;
@@ -257,6 +290,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         else if(cameraAngle.equals(NORTH_UP)){
             nowCameraAngle = 0;
         }
+        if (mMap == null) return; // [修正 2026/10] 地図の準備前に呼ばれた場合に落ちないようにする
         LatLng location = new LatLng(mLocation.getLatitude(), mLocation.getLongitude());
         CameraPosition cameraPos = new CameraPosition.Builder().target(location).zoom(cameraLevel).bearing(nowCameraAngle).tilt(60).build();
         mMap.moveCamera(CameraUpdateFactory.newCameraPosition(cameraPos));
@@ -350,6 +384,17 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
      * @param peripheralUserInfos 現在の周辺ユーザ数
      */
     synchronized public void arrangeMarker(final UserInfo userInfo, final ArrayList<UserInfo> peripheralUserInfos) {
+        // [修正 2026/10] markerListの読み書きとマーカー操作をすべてUIスレッドで行う
+        // （受信スレッドとUIスレッドで同時に操作するとIndexOutOfBoundsException等で落ちるため）
+        runOnUiThread(new Runnable() {
+            public void run() {
+                arrangeMarkerOnUiThread(userInfo, peripheralUserInfos);
+            }
+        });
+    }
+
+    // [修正 2026/10] UIスレッドから呼ぶこと（中のrunOnUiThreadはその場で即時実行される）
+    private void arrangeMarkerOnUiThread(final UserInfo userInfo, final ArrayList<UserInfo> peripheralUserInfos) {
         /************************************************マーカの削除************************************************/
         if (userInfo == null) {
             Log.d("Main_arrangeMarker", "マーカの削除を行う関数が呼ばれたときのマーカ数：" + markerList.size());
@@ -428,6 +473,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
 
         /////////////////////////////////////////////マーカの作成の実行/////////////////////////////////////////////
+        if (mMap == null) return; // [修正 2026/10] 地図の準備前はマーカーを作成しない
         addMarker = ADD_MARKER_PROGRESS;
         runOnUiThread(new Runnable() {
             public void run() {
