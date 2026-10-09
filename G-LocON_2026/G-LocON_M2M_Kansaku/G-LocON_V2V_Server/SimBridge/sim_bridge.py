@@ -13,7 +13,10 @@
 ■ スマホ（アプリのSUMOモード）とのやりとり（UDP, 既定ポート 55700）
     スマホ → ブリッジ  SIM_HELLO      {peerID}            車の割り当てを要求（割り当てまで2秒ごと）
                        SIM_ROUTE_REQ  {peerID}            ルートを再送してほしい
+                       SIM_ALIVE      {peerID, vehicleId} 乗車中の生存通知（2秒ごと）。10秒届かなければ降りたとみなす
                        SIM_BYE        {peerID}            終了
+    実機が降りたとき（SIM_BYE・SIM_ALIVE のタイムアウト・同じ peerID のアプリの起動し直し）は，
+    印（円と端末名）を消し，その車には仮想クライアントを付け直して仮想車両として走らせ続ける（--virtual のとき）
     ブリッジ → スマホ  SIM_ROUTE      {vehicleId, intersections:[{intersectionId,lat,lon}], shape:[[lat,lon],...], destLat, destLon,
                                        leaveDist, joinEta, joinDist}（shape は道の形。地図のルート線用）
                        SIM_LOCATION   {vehicleId, latitude, longitude, speed[m/s], bearing, simTime}（1秒ごと）
@@ -71,6 +74,10 @@ APPROACH_SIDE_M = 12.0    # 危険地点が自分のルートの線からこの�
 APPROACH_ANGLE_DEG = 60.0 # 危険車両の向きと，その地点での自分のルートの向きの差がこれ以内なら同じ方向
 APPROACH_MAX_M = 400.0    # これより先の危険地点は対象外
 PENDING_MAX_SEC = 15.0    # 表示の色替えを待つ最大時間（止まった車などで尻尾が円から出ない場合）
+PHONE_TIMEOUT_SEC = 10.0  # 実機から何も届かない時間がこれを超えたら，切断と同じ扱いにする（強制終了・電波切れ対策）
+PHONE_RING = (255, 0, 255)         # sumo-gui: 実機が乗っている車を囲む太い円の色（車体はグループの色）
+PHONE_RING_R = 40.0                # その半径 [m]（描かれた車は8倍に拡大されて約36m）
+PHONE_RING_W = 5.0                 # その線の太さ [m]（離脱円の細い線と見分けるため太くする）
 COLOR_STOPPED = (0, 0, 0)          # sumo-gui: 急停止中の車（黒。赤い円で囲む）
 COLOR_SLOWING = (140, 80, 20)      # sumo-gui: 危険情報を受けて減速中の車（茶色。減速を始めたときにオレンジの円）
 PALETTE = [(230, 25, 75), (60, 180, 75), (255, 225, 25), (0, 130, 200), (245, 130, 48),
@@ -128,6 +135,103 @@ def hazard_ahead(path, cum, me_xy, s_last, hx, hy, h_bearing):
     return None, s_me
 
 
+def route_step(seq, lat, lon, speed):
+    """アプリの IntersectionManager.update と同じ判定を1回行う（距離・通過済みを更新し，すべきことを返す）.
+
+    seq はルート順の Intersection。返り値（順に処理する）:
+      ("passed_next", it) 後の交差点を通過したのに近づかないままだった → 通過したものとみなす
+      ("join", it, eta)   参加する（ETA < τ または ρ 以内）
+      ("leave", it)       離脱する（通過済み・δ以上・遠ざかっている）
+    仮想クライアント（送信する）と，実機の車の色分け用の追跡（送信しない）で共通に使う。
+    """
+    nxt = 0
+    while nxt < len(seq) and seq[nxt].passed:
+        nxt += 1
+    last_passed = nxt - 1
+    for k, it in enumerate(seq):
+        it.set_dist(hubeny(lat, lon, it.lat, it.lon))
+        if nxt <= k <= nxt + PASS_LOOKAHEAD and it.dist <= PASS_RADIUS_M:
+            it.passed = True
+            last_passed = max(last_passed, k)
+    for k, it in enumerate(seq):
+        eta = it.dist / speed
+        if k < last_passed and not it.passed:
+            it.passed = True
+            yield ("passed_next", it)
+            continue
+        if not it.joined and not it.left and it.es:
+            if eta < common.JOIN_ETA_SEC or it.dist < common.JOIN_DIST_M:
+                yield ("join", it, eta)
+        elif it.joined and it.should_leave():
+            yield ("leave", it)
+
+
+class GroupColor:
+    """sumo-gui の車の色を「これから入る交差点」の色にする（仮想クライアントと実機の車で共通）.
+
+    使う側は self.br, self.vid, self.ix（ルート順の Intersection）, self.color_iid を持つ。
+    """
+
+    def next_group(self):
+        """色を付ける交差点: JOIN中のうち，まだ通過していない最初の交差点（＝これから入る交差点）.
+
+        複数の交差点に同時にJOINしているとき，後からJOINした先の交差点ではなく，手前の交差点の色にする。
+        JOIN中の交差点をすべて通過済みなら（離脱円を出るまで）その交差点，どこにもJOINしていなければ None.
+        """
+        joined = [i for i in self.ix.values() if i.joined]          # ルート順
+        ahead = [i for i in joined if not i.passed]
+        pick = ahead or joined
+        return pick[0].iid if pick else None
+
+    def update_color(self):
+        """JOIN や交差点の通過で「これから入る交差点」が変わったら色を替える（LEAVE 後の色替え待ちの間は待つ）."""
+        br = self.br
+        key = self.next_group()
+        if key == self.color_iid or self.vid in br.pending_color:
+            return
+        if key is None and self.color_iid is not None:
+            return                       # 灰色に戻すのは LEAVE の後（color_after_leave）だけ
+        self.color_iid = key
+        br.set_color(self.vid, key)
+
+    def color_on_leave(self, left_iid):
+        nxt = self.next_group()
+        if nxt != self.color_iid:        # 同じなら，通過した時点で次の交差点の色に替えてある
+            self.color_iid = nxt
+            self.br.color_after_leave(self.vid, nxt, left_iid)
+
+
+class PhoneTracker(GroupColor):
+    """実機が乗っている車の色分け用。アプリと同じ判定で JOIN 中の交差点を追う（何も送らない。表示のみ）."""
+
+    def __init__(self, br, vid):
+        self.br, self.vid, self.color_iid = br, vid, None
+        self.ix = {iid: Intersection(iid, la, lo) for iid, la, lo in br.route_intersections(vid)}
+        for it in self.ix.values():
+            it.es = it.iid in br.es_index     # エッジサーバのある交差点だけ JOIN する（アプリと同じ）
+        self.next_tick = br.now()
+
+    def tick(self):
+        br = self.br
+        if br.now() < self.next_tick or self.vid not in br.alive:
+            return
+        self.next_tick = br.now() + UPDATE_SEC
+        x, y = common.vehicle_xy(br.t, self.vid)
+        lon, lat = br.net.convertXY2LonLat(x, y)
+        speed = max(br.t.vehicle.getSpeed(self.vid), MIN_SPEED)
+        for act in route_step(list(self.ix.values()), lat, lon, speed):
+            it = act[1]
+            if act[0] == "join":
+                it.joined = True
+                br.pending_color.pop(self.vid, None)
+            elif it.joined:                      # leave / passed_next
+                it.joined, it.left = False, True
+                self.color_on_leave(it.iid)
+            else:
+                it.left = True
+        self.update_color()
+
+
 class Intersection:
     """アプリの navigation.Intersection と同じ状態を持つ."""
 
@@ -156,6 +260,7 @@ class Bridge:
         self.clients = {}                   # vid -> VirtualClient
         self.phones = {}                    # addr -> Phone
         self.phone_vehicles = {}            # vid -> Phone
+        self.trackers = {}                  # vid -> PhoneTracker（実機の車の色分け用）
         self.joined_truth = {}              # iid -> set(peerID)  ブリッジが把握するJOIN中の仮想クライアント
         self.changed = {}                   # (iid, peerID) -> 最後にJOIN/LEAVEしたシミュレーション時刻
         # 色は edge_servers.csv の行（ポート）の順。--move で交差点を移しても色は変わらない
@@ -236,13 +341,26 @@ class Bridge:
     def on_phone(self, msg, addr):
         pt = msg.get("processType")
         ph = self.phones.get(addr)
+        if ph:
+            ph.last_rx = time.time()
         if pt == "SIM_HELLO":
             if ph is None:
+                # 同じ端末がアプリを起動し直した（送信元ポートが変わる）→ 前の割り当てを切断と同じ扱いにする
+                peer = msg.get("peerID", "?")
+                for old in [p for p in self.phones.values() if p.peer == peer]:
+                    self.release_phone(old, "PHONE_REJOIN")
                 if len(self.phones) >= self.a.phones:
                     return
-                ph = Phone(msg.get("peerID", "?"), addr)
+                ph = Phone(peer, addr)
                 self.phones[addr] = ph
                 self.log("PHONE_HELLO", ph.peer, "", f"{addr[0]}:{addr[1]}")
+        elif pt == "SIM_ALIVE":
+            if ph is None or ph.vid != msg.get("vehicleId"):
+                # ブリッジを起動し直した等で，この端末の割り当てを覚えていない → 割り当てからやり直してもらう
+                self.send_phone(ph or Phone(msg.get("peerID", "?"), addr),
+                                {"processType": "SIM_END", "vehicleId": msg.get("vehicleId", "")})
+            else:
+                ph.alive_seen = True
         elif pt == "SIM_ROUTE_REQ" and ph and ph.vid:
             self.send_route(ph)
         elif pt == "VEHICLE_COMMAND" and ph and ph.vid:
@@ -250,11 +368,39 @@ class Bridge:
             self.vehicle_command(ph.vid, msg.get("command"), msg.get("hazardId", "?"),
                                  src=ph.peer, gap=msg.get("gap"))
         elif pt == "SIM_BYE" and ph:
-            if ph.vid:
-                self.phone_vehicles.pop(ph.vid, None)
-                self.set_color(ph.vid, None)
-            del self.phones[addr]
-            self.log("PHONE_BYE", ph.peer, ph.vid or "", "")
+            self.release_phone(ph, "PHONE_BYE")
+
+    def release_phone(self, ph, why):
+        """実機が車を降りた（切断・タイムアウト・アプリの再起動）。印を消し，車は仮想車両として走らせ続ける."""
+        vid = ph.vid
+        self.phones.pop(ph.addr, None)
+        self.log(why, ph.peer, vid or "", "")
+        if not vid:
+            return
+        ph.vid = None
+        self.phone_vehicles.pop(vid, None)
+        self.trackers.pop(vid, None)
+        self.pending_color.pop(vid, None)
+        self.unmark_phone(vid, ph)
+        if vid not in self.alive:
+            return
+        self.set_color(vid, None)
+        if self.a.virtual and vid not in self.clients and len(self.clients) < self.a.virtual_max:
+            seq = self.route_intersections(vid)
+            if seq:
+                self.clients[vid] = VirtualClient(self, vid, seq)
+                self.log("PHONE_TO_VIRTUAL", ph.peer, vid, f"intersections={len(seq)}")
+
+    def check_phone_timeouts(self):
+        """実機から PHONE_TIMEOUT_SEC 何も届かなければ切断と同じ扱いにする.
+
+        乗車中は SIM_ALIVE を送る版のアプリ（alive_seen）だけを対象にする（古いアプリは乗車中に何も送らないため）。
+        割り当て待ちの端末は SIM_HELLO を2秒ごとに送るので，常に対象にする（枠が空いたままになるのを防ぐ）。
+        """
+        now = time.time()
+        for ph in list(self.phones.values()):
+            if (ph.vid is None or ph.alive_seen) and now - ph.last_rx > PHONE_TIMEOUT_SEC:
+                self.release_phone(ph, "PHONE_TIMEOUT")
 
     def send_phone(self, ph, obj):
         try:
@@ -343,7 +489,9 @@ class Bridge:
                 self.clients.pop(vid).close("PHONE_TAKEOVER")
             self.log("PHONE_ASSIGN", ph.peer, vid, f"es_on_route={n_es}")
             self.send_route(ph)
-            self.set_color(vid, "phone")
+            self.set_color(vid, None)                 # 車体はグループの色（これから入る交差点）。実機は円と端末名で示す
+            if self.a.gui:
+                self.trackers[vid] = PhoneTracker(self, vid)
             self.mark_phone(vid, ph)
 
     def update_phones(self, arrived):
@@ -358,6 +506,8 @@ class Bridge:
                 self.log("PHONE_END", ph.peer, vid, "")
                 ph.vid = None
                 del self.phone_vehicles[vid]
+                self.trackers.pop(vid, None)
+                self.unmark_phone(vid, ph)
                 continue
             x, y = common.vehicle_xy(self.t, vid)            # 車の中心（スマホは車内にある）
             lon, lat = self.net.convertXY2LonLat(x, y)
@@ -537,15 +687,40 @@ class Bridge:
                 self.hlog("", "", "RESUME", vid)
 
     def mark_phone(self, vid, ph):
-        """sumo-gui で実機が乗っている車を目立たせる（紫の大きな円で囲み，ラベルに端末名を出す）."""
+        """sumo-gui で実機が乗っている車を目立たせる（太い紫の円で囲み，車の横に端末名を出す）."""
         if not self.a.gui:
             return
         try:
-            self.t.vehicle.highlight(vid, (255, 0, 255, 255), size=25)
+            # 太い円で囲む（車に付いて動く図形。降りたときに消すため ID を覚えておく）
+            x, y = self.t.vehicle.getPosition(vid)
+            pid = f"phone_{ph.peer}_{vid}"
+            shape = [(x + PHONE_RING_R * math.cos(2 * math.pi * k / 48), y + PHONE_RING_R * math.sin(2 * math.pi * k / 48))
+                     for k in range(49)]
+            self.t.polygon.add(pid, shape, PHONE_RING + (255,), fill=False, layer=110, lineWidth=PHONE_RING_W)
+            self.t.polygon.addDynamics(pid, trackedObjectID=vid, rotate=False)
+            ph.rings = {pid}
+            # 端末名を車の横に文字で出す（gui_settings.xml の vehicleTextParam="glocon.phone"）
             self.t.vehicle.setParameter(vid, "glocon.phone", ph.peer)
             if self.a.follow_phone:
                 self.t.gui.trackVehicle("View #0", vid)
                 self.t.gui.setZoom("View #0", 400)
+        except Exception:
+            pass
+
+    def unmark_phone(self, vid, ph):
+        """実機の印（円と端末名）を消す."""
+        if not self.a.gui:
+            return
+        for pid in getattr(ph, "rings", ()):
+            try:
+                self.t.polygon.remove(pid)
+            except Exception:
+                pass
+        ph.rings = set()
+        if vid not in self.alive:
+            return
+        try:
+            self.t.vehicle.setParameter(vid, "glocon.phone", "")
         except Exception:
             pass
 
@@ -576,9 +751,7 @@ class Bridge:
     def set_color(self, vid, kind):
         if not self.a.gui or vid not in self.alive:
             return
-        if kind == "phone":
-            col = (255, 0, 255)
-        elif kind is None:
+        if kind is None:
             col = (160, 160, 160)
         else:
             col = PALETTE[self.es_index.get(kind, 0) % len(PALETTE)]
@@ -629,6 +802,8 @@ class Bridge:
                 self.assign_phones(departed)
                 if self.a.virtual:
                     self.update_virtual(departed, arrived)
+                for tr in list(self.trackers.values()):
+                    tr.tick()
                 if self.a.control != "off":
                     self.step_hazards()        # 仮想クライアントを作った後（出発直後の急停止でも送れるように）
                 if self.a.control == "system":
@@ -638,6 +813,7 @@ class Bridge:
                 if self.now() >= next_update:
                     next_update = self.now() + UPDATE_SEC
                     self.update_phones(arrived)
+                    self.check_phone_timeouts()
                     if self.a.virtual:
                         self.check_consistency(cw)
                 # 実時間に合わせる（受信処理はこの待ち時間の間に行う）
@@ -656,9 +832,12 @@ class Phone:
     def __init__(self, peer, addr):
         self.peer, self.addr, self.vid = peer, addr, None
         self.hazard = None                  # 乗っている車が急停止中なら {id, intersectionId, active}
+        self.last_rx = time.time()          # 最後に何か届いた時刻（タイムアウトの判定用）
+        self.alive_seen = False             # 乗車中に SIM_ALIVE を送る版のアプリか
+        self.rings = set()                  # sumo-gui で車を囲んでいる円（polygon ID）
 
 
-class VirtualClient:
+class VirtualClient(GroupColor):
     def __init__(self, br, vid, seq):
         self.br, self.vid, self.peer = br, vid, f"sim-{vid}"
         self.ix = {iid: Intersection(iid, la, lo) for iid, la, lo in seq}
@@ -720,43 +899,32 @@ class VirtualClient:
         self.count += 1
         lat, lon = self.user()
         speed = max(br.t.vehicle.getSpeed(self.vid), MIN_SPEED)
-        seq = list(self.ix.values())       # ルート順（アプリの IntersectionManager.update と同じ判定）
-        nxt = 0
-        while nxt < len(seq) and seq[nxt].passed:
-            nxt += 1
-        last_passed = nxt - 1
-        for k, it in enumerate(seq):
-            it.set_dist(hubeny(lat, lon, it.lat, it.lon))
-            if nxt <= k <= nxt + PASS_LOOKAHEAD and it.dist <= PASS_RADIUS_M:
-                it.passed = True
-                last_passed = max(last_passed, k)
-        for k, it in enumerate(seq):
-            eta = it.dist / speed
-            if k < last_passed and not it.passed:
+        # ルート順（アプリの IntersectionManager.update と同じ判定）
+        for act in route_step(list(self.ix.values()), lat, lon, speed):
+            it = act[1]
+            if act[0] == "passed_next":
                 # 保険: 後の交差点を通過したのに近づかないままだった → 通過したものとみなす
-                it.passed = True
                 if it.joined:
                     self.leave(it, lat, lon, "V_LEAVE_PASSED_NEXT")
                 else:
                     it.left = True
-                continue
-            if not it.joined and not it.left and it.es:
-                if eta < common.JOIN_ETA_SEC or it.dist < common.JOIN_DIST_M:
-                    it.joined = True
-                    msg = self.base("JOIN", it.iid, lat, lon)
-                    msg["eta"] = eta
-                    self.send(msg, it.es)
-                    self.join_t[it.iid] = br.now()
-                    self.join_sent_wall[it.iid] = time.time()
-                    self.last_keep[it.iid] = br.now()
-                    br.joined_truth.setdefault(it.iid, set()).add(self.peer)
-                    br.changed[(it.iid, self.peer)] = br.now()
-                    br.stats["join_sent"] += 1
-                    br.log("V_JOIN", self.peer, it.iid, f"eta={eta:.1f}")
-                    br.pending_color.pop(self.vid, None)     # 前の交差点の色替え待ちは取り消す
-                    self.show_state()
-            elif it.joined and it.should_leave():
+            elif act[0] == "leave":
                 self.leave(it, lat, lon, "V_LEAVE")
+            else:
+                eta = act[2]
+                it.joined = True
+                msg = self.base("JOIN", it.iid, lat, lon)
+                msg["eta"] = eta
+                self.send(msg, it.es)
+                self.join_t[it.iid] = br.now()
+                self.join_sent_wall[it.iid] = time.time()
+                self.last_keep[it.iid] = br.now()
+                br.joined_truth.setdefault(it.iid, set()).add(self.peer)
+                br.changed[(it.iid, self.peer)] = br.now()
+                br.stats["join_sent"] += 1
+                br.log("V_JOIN", self.peer, it.iid, f"eta={eta:.1f}")
+                br.pending_color.pop(self.vid, None)     # 前の交差点の色替え待ちは取り消す
+                self.show_state()
         self.update_color()
         for iid, t0 in self.last_keep.items():
             it = self.ix[iid]
@@ -837,28 +1005,6 @@ class VirtualClient:
         except Exception:
             pass
 
-    def next_group(self):
-        """色を付ける交差点: JOIN中のうち，まだ通過していない最初の交差点（＝これから入る交差点）.
-
-        複数の交差点に同時にJOINしているとき，後からJOINした先の交差点ではなく，手前の交差点の色にする。
-        JOIN中の交差点をすべて通過済みなら（離脱円を出るまで）その交差点，どこにもJOINしていなければ None.
-        """
-        joined = [i for i in self.ix.values() if i.joined]          # ルート順
-        ahead = [i for i in joined if not i.passed]
-        pick = ahead or joined
-        return pick[0].iid if pick else None
-
-    def update_color(self):
-        """JOIN や交差点の通過で「これから入る交差点」が変わったら色を替える（LEAVE 後の色替え待ちの間は待つ）."""
-        br = self.br
-        key = self.next_group()
-        if key == self.color_iid or self.vid in br.pending_color:
-            return
-        if key is None and self.color_iid is not None:
-            return                       # 灰色に戻すのは LEAVE の後（color_after_leave）だけ
-        self.color_iid = key
-        br.set_color(self.vid, key)
-
     def leave(self, it, lat, lon, ev):
         br = self.br
         it.joined, it.left = False, True
@@ -868,12 +1014,7 @@ class VirtualClient:
         br.changed[(it.iid, self.peer)] = br.now()
         br.stats["leave_sent"] += 1
         br.log(ev, self.peer, it.iid, f"dist={it.dist:.0f}")
-        nxt = self.next_group()
-        if nxt == self.color_iid:
-            pass                         # 通過した時点で次の交差点の色に替えてある
-        else:
-            self.color_iid = nxt
-            br.color_after_leave(self.vid, nxt, it.iid)
+        self.color_on_leave(it.iid)
         self.show_state()
 
     def on_message(self, msg, addr):

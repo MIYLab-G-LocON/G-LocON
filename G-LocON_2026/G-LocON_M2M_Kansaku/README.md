@@ -170,7 +170,7 @@ G-LocON_2026/
 | NATRegisterDstAddrPort | Client | 他車両 | NATに穴を開けるパケット |
 | SendLocation | Client | 他車両 | P2P直接通信（位置情報送信）．急停止中は危険情報 `hazard {id, intersectionId, active, latitude, longitude, bearing}` を付ける（解消時は active=false） |
 | VEHICLE_COMMAND | Client（SUMOモード） | SimBridge | シミュレータ車両への行動指令 `{command: DECELERATE / RESUME, hazardId, gap}`．危険情報を受けて接近中と判定したときに送る |
-| SIM_HELLO / SIM_ROUTE_REQ / SIM_BYE | Client（SUMOモード） | SimBridge | 車両の割り当て要求／ルート再送要求／終了 |
+| SIM_HELLO / SIM_ALIVE / SIM_ROUTE_REQ / SIM_BYE | Client（SUMOモード） | SimBridge | 車両の割り当て要求／乗車中の生存通知（2秒ごと。10秒途切れると降りたとみなす）／ルート再送要求／終了 |
 | SIM_ROUTE | SimBridge | Client（SUMOモード） | 割り当てた車両のルート上の交差点列と道の形（OSRMの結果の代わり），参加タイミング τ・離脱円 δ |
 | SIM_LOCATION | SimBridge | Client（SUMOモード） | 割り当てた車両の位置・速度・進行方向（1秒ごと，GPSの代わり） |
 | SIM_END | SimBridge | Client（SUMOモード） | 車両が目的地に到着（次の車両を割り当てる） |
@@ -252,7 +252,7 @@ CARLAはSUMOとの公式連携（co-simulation）があるため，デモ用の�
   「P2P」はP2Pでつながった車（実機は赤・緑，仮想車両は半透明の灰色のピン），「実機」はつながっていない実機も青い矢印で出す，
   「全車両」はそれに加えてつながっていない車も小さな矢印で出す（灰色=SUMOの車，青=実機．SimBridge が `SIM_VEHICLES` で送る）．
   2つを見比べると，グループに入ってP2Pでつながった車がどれかが分かる
-- **PC画面での確認**: `sim_bridge.py --gui` で sumo-gui を表示し，車両をグループ（交差点）ごとに色分けする（実機が乗っている車は紫，未参加は灰色）
+- **PC画面での確認**: `sim_bridge.py --gui` で sumo-gui を表示し，車両をグループ（交差点）ごとに色分けする（実機が乗っている車は太い紫の円と端末名，未参加は灰色）
 - **自動検証**: SimBridge は，各仮想クライアントがエッジサーバから受け取ったグループ一覧と，実際にその交差点にJOIN中の車両を毎秒比較し，
   一覧の一致率・JOIN応答時間などを記録する（評価指標「①システム」）
 - 実機なし・PCだけでもモードBを動かせる（`--phones 0 --virtual --local`）
@@ -643,7 +643,7 @@ PC側の起動は，下の手順のコマンドの代わりに **8.2 のデス�
 3. 各スマホ: 「開始」 → 「SUMO」 → 状態カードが「SUMO車両 vXX に乗車（交差点 n）」になり，その車の位置で走り出す．
    車が目的地に着くと自動で次の車に乗り換える
 4. 確認すること:
-   - sumo-gui では実機が乗っている車が紫（紫の円で囲む）
+   - sumo-gui では実機が乗っている車が太い紫の円で囲まれ，横に端末名（A など）が出る。車体の色はグループの色
    - 実機どうしが同じ交差点グループに入ると，互いの地図にピンが出る（「全車両」表示にすると，つながっていない実機は青の矢印）
 5. 終了: ターミナル2で Ctrl+C（全ての車が着くと自動で終わる）．記録は `SimBridge/out/live_<日時>_<制御>_t<τ>_j<ρ>_d<δ>/`
 
@@ -899,7 +899,7 @@ IntelliJ など他の java も終了させてよければ `Get-Process java | St
 
 ### 9.14 sumo-gui で実機が乗っている車が見つからない
 
-**対処**: 実機が乗っている車は紫で，紫の円で囲まれる．`sim_bridge.py` に `--follow-phone` を付けると画面がその車を追いかける（乗り換えても追従）．
+**対処**: 実機が乗っている車は太い紫の円で囲まれ，車の横に端末名が出る（車体の色はグループの色）．`sim_bridge.py` に `--follow-phone` を付けると画面がその車を追いかける（乗り換えても追従）．
 車を右クリック →「Show Parameter」の `glocon.phone` に端末名が出る．
 
 ### 9.15 スマホがPCのホットスポットから自宅Wi-Fiに戻ってしまう

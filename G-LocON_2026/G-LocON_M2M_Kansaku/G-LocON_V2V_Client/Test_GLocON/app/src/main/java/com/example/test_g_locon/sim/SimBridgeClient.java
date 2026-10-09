@@ -23,7 +23,8 @@ import java.util.List;
  * アプリはそれを OSRM のルート・GPS の位置の代わりに使う（JOIN/LEAVE・P2P は通常と同じ処理）。
  *
  * やりとり（UDP, 既定ポート 55700）:
- *   端末 → SimBridge : SIM_HELLO（割り当てまで2秒ごと）/ SIM_ROUTE_REQ / SIM_BYE
+ *   端末 → SimBridge : SIM_HELLO（割り当てまで2秒ごと）/ SIM_ALIVE（乗車中2秒ごと）/ SIM_ROUTE_REQ / SIM_BYE
+ *                      SIM_ALIVE が10秒届かないと，SimBridge はアプリが落ちたとみなして車を仮想車両に戻す
  *   SimBridge → 端末 : SIM_ROUTE（ルート上の交差点）/ SIM_LOCATION（1秒ごと）/ SIM_END（目的地到着）
  *                      SIM_VEHICLES（周りの全車両，1秒ごと。「表示:全車両」用）
  *
@@ -33,6 +34,8 @@ public class SimBridgeClient implements Runnable {
 
     private static final String TAG = "SimBridgeClient";
     private static final long HELLO_INTERVAL_MS = 2000;
+    /** 乗車中に「まだ動いている」ことを SimBridge に知らせる間隔（強制終了の検出用） */
+    private static final long ALIVE_INTERVAL_MS = 2000;
 
     public interface Listener {
         /** 新しい車が割り当てられ，そのルート上の交差点が届いた */
@@ -110,6 +113,25 @@ public class SimBridgeClient implements Runnable {
         new Thread(() -> sendNow(s, processType)).start();
     }
 
+    /** 乗車中の生存通知（乗っている車のIDを付ける。SimBridge が覚えていなければ SIM_END が返り，割り当てからやり直す） */
+    private void sendAlive() {
+        final DatagramSocket s = socket;
+        final String vid = vehicleId;
+        if (s == null || vid == null) return;
+        new Thread(() -> {
+            try {
+                JSONObject o = new JSONObject();
+                o.put("processType", "SIM_ALIVE");
+                o.put("peerID", peerId);
+                o.put("vehicleId", vid);
+                byte[] d = o.toString().getBytes();
+                s.send(new DatagramPacket(d, d.length, InetAddress.getByName(bridgeIp), bridgePort));
+            } catch (Exception e) {
+                Log.d(TAG, "送信エラー: " + e);
+            }
+        }).start();
+    }
+
     private void sendNow(DatagramSocket s, String processType) {
         try {
             JSONObject o = new JSONObject();
@@ -132,11 +154,16 @@ public class SimBridgeClient implements Runnable {
             return;
         }
         long lastHello = 0;
+        long lastAlive = 0;
         byte[] buf = new byte[65507];
         while (running) {
             if (vehicleId == null && System.currentTimeMillis() - lastHello > HELLO_INTERVAL_MS) {
                 send("SIM_HELLO");
                 lastHello = System.currentTimeMillis();
+            }
+            if (vehicleId != null && System.currentTimeMillis() - lastAlive > ALIVE_INTERVAL_MS) {
+                sendAlive();
+                lastAlive = System.currentTimeMillis();
             }
             DatagramPacket p = new DatagramPacket(buf, buf.length);
             try {

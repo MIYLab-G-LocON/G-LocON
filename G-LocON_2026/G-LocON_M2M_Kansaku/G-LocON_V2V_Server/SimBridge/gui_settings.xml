@@ -2,7 +2,7 @@
     <scheme name="G-LocON">
         <background backgroundColor="white" showGrid="0"/>
         <edges laneEdgeMode="0" laneShowBorders="1" showLinkDecals="0" showRails="0" hideConnectors="1"/>
-        <vehicles vehicleMode="0" vehicleQuality="0" vehicle_minSize="1" vehicle_exaggeration="8" showBlinker="0"/>
+        <vehicles vehicleMode="0" vehicleQuality="0" vehicle_minSize="1" vehicle_exaggeration="8" showBlinker="0" vehicleText_show="1" vehicleText_size="200" vehicleText_color="255,0,255" vehicleText_bgColor="255,255,255" vehicleText_constantSize="0" vehicleTextParam="glocon.phone"/>
         <junctions junctionMode="0" drawShape="1"/>
         <pois poi_minSize="1" poi_exaggeration="1" poiName_show="1" poiName_size="60"/>
     </scheme>
