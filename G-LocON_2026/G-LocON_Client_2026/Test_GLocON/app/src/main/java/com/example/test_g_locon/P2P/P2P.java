@@ -14,12 +14,14 @@ import java.net.DatagramSocket;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 public class P2P implements IP2PReceiver{
     private IP2P iP2P;
     private DatagramSocket socket;
     private UserInfo myUserInfo;
-    private ArrayList<UserInfo> peripheralUsers; //周辺ユーザ情報
+    // [修正 2026/10] 受信スレッドでの追加と送信スレッドでの走査が同時に起きるため CopyOnWriteArrayList（List 型）に変更
+    private volatile List<UserInfo> peripheralUsers; //周辺ユーザ情報
     private OutputToCSV sendFileInput; //sendデータをCSVに書き込み
     private OutputToCSV receiveFileInput; //receiveデータをCSVに書き込み
     private List<MemoryToSendData> sendMemory; //sendデータを記録
@@ -37,7 +39,7 @@ public class P2P implements IP2PReceiver{
         this.iP2P = iP2P;
         this.socket = socket;
         this.myUserInfo = myUserInfo;
-        peripheralUsers = new ArrayList<>();
+        peripheralUsers = new CopyOnWriteArrayList<>(); // [修正 2026/10]
 
         /**
          * setUpMemoryを使う場合は以下のステップを行う必要がる。
@@ -49,7 +51,7 @@ public class P2P implements IP2PReceiver{
         sendMemory = Collections.synchronizedList(new ArrayList<MemoryToSendData>()); //代わりに
     }
 
-    public ArrayList<UserInfo> getPeripheralUsers(){
+    public List<UserInfo> getPeripheralUsers(){ // [修正 2026/10] ArrayList → List
         return  peripheralUsers;
     }
 
@@ -93,11 +95,12 @@ public class P2P implements IP2PReceiver{
         signaling.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
     }
 
-    public void signalingDelete() {
+    // [修正 2026/10] 終了処理で送信完了を待てるよう AsyncTask を返す（戻り値を使わない従来の呼び出し方もそのまま可）
+    public AsyncTask<String, String, Integer> signalingDelete() {
         ESignalingProcess eSignalingProcess;
         eSignalingProcess = ESignalingProcess.DELETE;
         Signaling signaling = new Signaling(socket, myUserInfo, eSignalingProcess);
-        signaling.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+        return signaling.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
     }
     /**************SignalingServerへの接続系**************************/
 
@@ -140,7 +143,7 @@ public class P2P implements IP2PReceiver{
      */
     @Override
     public void onGetPeripheralUser(ArrayList<UserInfo> newPeripheralUsers) {
-        peripheralUsers = newPeripheralUsers;
+        peripheralUsers = new CopyOnWriteArrayList<>(newPeripheralUsers); // [修正 2026/10] スレッドセーフなリストに詰め替え
         iP2P.onGetPeripheralUsersInfo(peripheralUsers);
         natRegisterDstUsers();
     }
@@ -235,6 +238,10 @@ public class P2P implements IP2PReceiver{
      * @param locationUpdateCount 自身が取得した位置情報更新回数
      */
     public void MemoryToCSV_Send(int locationUpdateCount) {
+        // [修正 2026/10] setUpMemory() 未実行（CSV記録なし）の場合は記録しない。記録しても読み出されず sendMemory が際限なく増えるため
+        if (sendFileInput == null) {
+            return;
+        }
         String sendTime = "";
         SetDate d = new SetDate();
         sendTime = d.convertLong(System.currentTimeMillis());

@@ -25,17 +25,23 @@ public class STUNServerClientReceiver extends AsyncTask<String, String, Integer>
         DatagramPacket receivePacket = new DatagramPacket(new byte[128], 128);
         String addr;
         int port;
-        try {
-            socket.receive(receivePacket);
-            String allData = new String(receivePacket.getData(), 0, receivePacket.getLength());
-            Log.d("UDP_HOLE_PUNCHING", allData);
-            String result[] = allData.split("-", 0);
-            addr = result[0];
-            port = Integer.parseInt(result[1]);
-            istunServerClientReceiver.onReceiveMsgFromStun(addr, port);
+        // [修正 2026/10] 想定外のデータを受信した場合も終了せず、正しい応答（"IP-PORT"）を受信するまで待ち続ける
+        while (true) {
+            try {
+                receivePacket.setLength(128);
+                socket.receive(receivePacket);
+                String allData = new String(receivePacket.getData(), 0, receivePacket.getLength());
+                Log.d("UDP_HOLE_PUNCHING", allData);
+                String result[] = allData.split("-", 0);
+                addr = result[0];
+                port = Integer.parseInt(result[1]);
 
-        } catch (Exception e) {
-            Log.d("hogehoge", "変換で失敗" + e);
+            } catch (Exception e) {
+                Log.d("hogehoge", "変換で失敗" + e);
+                continue;
+            }
+            istunServerClientReceiver.onReceiveMsgFromStun(addr, port);
+            break;
         }
         return 0;
     }

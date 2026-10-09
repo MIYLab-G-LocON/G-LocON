@@ -24,8 +24,8 @@ G-LocON_2026/
 | 変更内容 | 旧 | 新 |
 |---------|----|----|
 | 地図ライブラリ | Google Maps SDK | osmdroid（OSS） |
-| 非同期処理 | AsyncTask（非推奨） | ExecutorService |
-| Java バージョン | Java 8 | Java 17 |
+| 非同期処理 | AsyncTask（非推奨） | 変更なし：クライアントは AsyncTask（`executeOnExecutor(THREAD_POOL_EXECUTOR)`）、サーバは Thread |
+| Java バージョン | Java 8 | 変更なし：クライアントのソースは Java 8（ビルドには JDK 17 が必要：AGP 8.1）、サーバは Java 11（Eclipse 設定） |
 
 ---
 

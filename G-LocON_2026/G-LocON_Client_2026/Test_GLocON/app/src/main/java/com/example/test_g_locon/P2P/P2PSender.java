@@ -10,16 +10,16 @@ import org.json.JSONObject;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
-import java.util.ArrayList;
+import java.util.List;
 
 public class P2PSender extends AsyncTask<String, String, Integer> {
     private DatagramSocket socket;
     private int locationUpdateCount;
     private UserInfo myUserInfo;
-    private ArrayList<UserInfo> peripheralUsers;
+    private List<UserInfo> peripheralUsers; // [修正 2026/10] ArrayList → List（CopyOnWriteArrayList を受け取る）
     private EP2PProcess eP2PProcess;
 
-    P2PSender(DatagramSocket socket,int locationUpdateCount,UserInfo myUserInfo,ArrayList<UserInfo> peripheralUsers,EP2PProcess eP2PProcess){
+    P2PSender(DatagramSocket socket,int locationUpdateCount,UserInfo myUserInfo,List<UserInfo> peripheralUsers,EP2PProcess eP2PProcess){
         this.socket = socket;
         this.locationUpdateCount = locationUpdateCount;
         this.myUserInfo = myUserInfo;

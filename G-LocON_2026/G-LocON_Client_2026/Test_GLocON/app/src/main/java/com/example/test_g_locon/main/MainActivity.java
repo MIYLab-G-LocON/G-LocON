@@ -45,6 +45,7 @@ import java.net.SocketException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 // [変更] クラス宣言から OnMapReadyCallback と GoogleMap.OnMarkerClickListener を削除
 //   OnMapReadyCallback  → osmdroid は非同期コールバック不要。onCreate で直接 MapView を初期化する
@@ -68,7 +69,7 @@ public class MainActivity extends AppCompatActivity
     // [変更] Circle（Google Maps）→ Polygon（osmdroid）。osmdroidに Circle クラスはなく Polygon で円を近似する
     private Polygon circle = null;
     final static private double TOLERANCE_SPEED = 7; //速度差
-    private float cameraLevel = 4.0f;
+    private float cameraLevel = 18.0f; // [修正 2026/10] 初期ズームをコメント通り 18 に（4 だと国レベルの縮尺）
     final static private String HEAD_UP = "HEAD_UP";
     final static private String NORTH_UP = "NORTH_UP";
     private String cameraAngle = HEAD_UP;
@@ -82,7 +83,7 @@ public class MainActivity extends AppCompatActivity
     private int geoUpdateCount = 1;
     private int totalGeoUpdateCount = 0;
     private double searchRange = 100;
-    private int addMarker = 0;
+    private volatile int addMarker = 0; // [修正 2026/10] UIスレッドで書き換え、受信スレッドで待つため volatile
     final private int ADD_MARKER_PROGRESS = 1;
     final private int NOT_ADD_MARKER_PROGRESS = 0;
     private P2P p2p;
@@ -174,7 +175,9 @@ public class MainActivity extends AppCompatActivity
             utilCommon.setPeerId(peerId.getText().toString());
 
             peerId.setVisibility(View.INVISIBLE);
-            start.setVisibility(View.VISIBLE);
+            // [修正 2026/10] 二重起動防止：開始後は start ボタンを隠して無効化（VISIBLE のままだと再押下で STUN/P2P が二重起動する）
+            start.setEnabled(false);
+            start.setVisibility(View.INVISIBLE);
             end.setVisibility(View.VISIBLE);
 /**/
             plus.setOnClickListener(this);
@@ -190,7 +193,22 @@ public class MainActivity extends AppCompatActivity
             stunServerClient.stunServerClientStart();
 
         } else if (v.getId() == R.id.end) {
-            System.exit(1);
+            // [修正 2026/10] 終了前にシグナリングサーバへ DELETE を送り、サーバ上の登録が残り続けないようにする
+            //   送信はバックグラウンドスレッドで行い、完了（最大2秒）を待ってから終了する
+            end.setEnabled(false);
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    if (p2p != null) {
+                        try {
+                            p2p.signalingDelete().get(2000, TimeUnit.MILLISECONDS);
+                        } catch (Exception e) {
+                            Log.d("Main_end", "DELETE送信失敗:" + e);
+                        }
+                    }
+                    System.exit(1);
+                }
+            }).start();
 
         } else if (v.getId() == R.id.plus) {
             cameraLevel += 1f;
@@ -304,7 +322,19 @@ public class MainActivity extends AppCompatActivity
      * @param port NAT変換されたグローバルPORT
      */
     @Override
-    public void onGetGlobalIP_Port(String IP, int port) {
+    public void onGetGlobalIP_Port(final String IP, final int port) {
+        // [修正 2026/10] STUN受信スレッド（バックグラウンド）から呼ばれるため、以降の処理をUIスレッドで実行する
+        //   バックグラウンドで位置情報取得を開始すると Looper が無く例外になり（受信側で握りつぶされ）位置更新が始まらなかった
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                startAfterGetGlobalIP_Port(IP, port);
+            }
+        });
+    }
+
+    // [修正 2026/10] onGetGlobalIP_Port の元の処理（UIスレッドで実行される）
+    private void startAfterGetGlobalIP_Port(String IP, int port) {
         myUserInfo.setPublicIP(IP);
         myUserInfo.setPublicPort(port);
         myUserInfo.setPrivateIP(GetPrivateIP());
@@ -351,7 +381,7 @@ public class MainActivity extends AppCompatActivity
      * 通信相手から詳細な位置，速度情報の取得
      */
     @Override
-    public void onGetDetailUserInfo(final UserInfo userInfo, ArrayList<UserInfo> peripheralUserInfos) {
+    public void onGetDetailUserInfo(final UserInfo userInfo, List<UserInfo> peripheralUserInfos) { // [修正 2026/10] ArrayList → List（スレッドセーフなリストを渡すため）
         arrangeMarker(userInfo, peripheralUserInfos);
     }
 
@@ -359,7 +389,7 @@ public class MainActivity extends AppCompatActivity
      * シグナリングサーバから周辺ユーザ情報を取得
      */
     @Override
-    public void onGetPeripheralUsersInfo(ArrayList<UserInfo> peripheralUserInfos) {
+    public void onGetPeripheralUsersInfo(List<UserInfo> peripheralUserInfos) { // [修正 2026/10] ArrayList → List
         arrangeMarker(null, peripheralUserInfos);
     }
 
@@ -369,7 +399,9 @@ public class MainActivity extends AppCompatActivity
      * @param userInfo            マーカ位置の更新を行う通信相手情報
      * @param peripheralUserInfos 現在の周辺ユーザ数
      */
-    synchronized public void arrangeMarker(final UserInfo userInfo, final ArrayList<UserInfo> peripheralUserInfos) {
+    synchronized public void arrangeMarker(final UserInfo userInfo, final List<UserInfo> peripheralUserInfos) { // [修正 2026/10] ArrayList → List
+        // [修正 2026/10] マーカ追加（UIスレッド）の完了を削除処理の前にも待つ。待たないと追加直後のマーカが markerList から外れ地図上に残り続ける
+        waitUntilFinishAddMarker();
         /************************************************マーカの削除************************************************/
         if (userInfo == null) {
             Log.d("Main_arrangeMarker", "マーカの削除を行う関数が呼ばれたときのマーカ数：" + markerList.size());
@@ -425,17 +457,18 @@ public class MainActivity extends AppCompatActivity
         waitUntilFinishAddMarker();
         /////////////////////////////////////////////マーカの更新の実行/////////////////////////////////////////////
         for (int i = 0; i < markerList.size(); i++) {
-            final int tmp = i;
+            // [修正 2026/10] インデックスではなく Marker 自体を保持する（UIスレッド実行時には markerList が差し替わっている場合があり IndexOutOfBounds になる）
+            final Marker targetMarker = markerList.get(i).getMarker();
             if (markerList.get(i).getPeerId().equals(userInfo.getPeerId())) {
                 if (userInfo.getSpeed() - myUserInfo.getSpeed() > TOLERANCE_SPEED) {
                     runOnUiThread(new Runnable() {
                         public void run() {
                             // [変更] setPosition(LatLng) → setPosition(GeoPoint)
-                            markerList.get(tmp).getMarker().setPosition(
+                            targetMarker.setPosition(
                                     new GeoPoint(userInfo.getLatitude(), userInfo.getLongitude()));
                             // [変更] BitmapDescriptorFactory.defaultMarker(HUE_RED) →
                             //   createColoredMarkerIcon(RED) で色付き丸アイコンを生成
-                            markerList.get(tmp).getMarker().setIcon(
+                            targetMarker.setIcon(
                                     createColoredMarkerIcon(android.graphics.Color.RED));
                             mMap.invalidate();
                         }
@@ -444,12 +477,12 @@ public class MainActivity extends AppCompatActivity
                     runOnUiThread(new Runnable() {
                         public void run() {
                             // [変更] setPosition(LatLng) → setPosition(GeoPoint)
-                            markerList.get(tmp).getMarker().setPosition(
+                            targetMarker.setPosition(
                                     new GeoPoint(userInfo.getLatitude(), userInfo.getLongitude()));
                             System.out.println("緯度" + userInfo.getLatitude() + "経度" + userInfo.getLongitude());
                             // [変更] BitmapDescriptorFactory.defaultMarker(HUE_GREEN) →
                             //   createColoredMarkerIcon(GREEN) で色付き丸アイコンを生成
-                            markerList.get(tmp).getMarker().setIcon(
+                            targetMarker.setIcon(
                                     createColoredMarkerIcon(android.graphics.Color.GREEN));
                             System.out.println("マーカーのセット完了");
                             mMap.invalidate();

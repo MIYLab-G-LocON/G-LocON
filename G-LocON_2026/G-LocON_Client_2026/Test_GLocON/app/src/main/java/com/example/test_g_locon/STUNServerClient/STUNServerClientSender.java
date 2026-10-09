@@ -12,6 +12,7 @@ import java.net.InetAddress;
 public class STUNServerClientSender extends AsyncTask<String, String, Integer> {
     private DatagramSocket socket;
     ISTUNServerClientSender istunServerClientSender;
+    final private static long HELLO_RETRY_INTERVAL = 2000; // [修正 2026/10] Hello 再送間隔(ms)
 
     STUNServerClientSender(DatagramSocket socket,ISTUNServerClientSender istunServerClientSender){
         this.socket = socket;
@@ -28,6 +29,7 @@ public class STUNServerClientSender extends AsyncTask<String, String, Integer> {
         UtilCommon utilCommon = (UtilCommon)UtilCommon.getAppContext();
         String stunServerIP = utilCommon.getStunServerIP();
         int stunServerPort = utilCommon.getStunServerPort();
+        boolean receiverStarted = false; // [修正 2026/10]
         while(true) {
             try {
                 byte[] sendData = sendMsg.getBytes();
@@ -36,12 +38,23 @@ public class STUNServerClientSender extends AsyncTask<String, String, Integer> {
                         sendData.length, InetAddress.getByName(stunServerIP), stunServerPort);
                 socket.send(sendPacket);
                 if(sendMsg.equals("Hello")){
-                    sendMsg = "Ping";
-                    istunServerClientSender.onSendFinishMsgToStun();
+                    // [修正 2026/10] 応答（UDP）が失われると止まったままになるため、応答を受信するまで Hello を一定間隔で再送する
+                    //   受信側（STUNServerClientReceiver）の起動は最初の 1 回だけ
+                    if (!receiverStarted) {
+                        receiverStarted = true;
+                        istunServerClientSender.onSendFinishMsgToStun();
+                    }
+                    sleep(HELLO_RETRY_INTERVAL);
+                    if (istunServerClientSender.isReceivedMsgFromStun()) {
+                        sendMsg = "Ping";
+                        sleep();
+                    }
+                    continue;
                 }
                 sleep();
             } catch (Exception e) {
                 Log.d("loghogehoge", "" + e);
+                sleep(HELLO_RETRY_INTERVAL); // [修正 2026/10] 送信失敗時に待たずにループし続けないようにする
             }
         }
     }
@@ -53,8 +66,13 @@ public class STUNServerClientSender extends AsyncTask<String, String, Integer> {
 
 
     private void sleep(){
+        sleep(60000); // [修正 2026/10] 待ち時間指定版に委譲
+    }
+
+    // [修正 2026/10] 待ち時間指定版（Hello 再送用）
+    private void sleep(long millis){
         try {
-            Thread.sleep(60000);
+            Thread.sleep(millis);
         } catch (InterruptedException e) {
             e.printStackTrace();
         }

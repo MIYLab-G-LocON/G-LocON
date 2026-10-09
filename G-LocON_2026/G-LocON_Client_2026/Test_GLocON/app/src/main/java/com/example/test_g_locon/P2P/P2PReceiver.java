@@ -28,15 +28,19 @@ public class P2PReceiver extends AsyncTask<String, String, Void> {
         final String DO_UDP_HOLE_PUNCHING = "doUDPHolePunching";
         final String SEND_DATA = "SendLocation";
         final String ACK = "Ack";
-        DatagramPacket receivePacket = new DatagramPacket(new byte[1024], 1024);
+        // [修正 2026/10] 1024 バイトでは周辺ユーザ数人分の userList で切り詰められ JSON 解析に失敗するため UDP 最大長に拡大
+        final int RECEIVE_BUFFER_SIZE = 65507;
+        DatagramPacket receivePacket = new DatagramPacket(new byte[RECEIVE_BUFFER_SIZE], RECEIVE_BUFFER_SIZE);
         do {
 
 
             Log.d("P2P", "P2Pレシーブ起動直前");
             try{
+                receivePacket.setLength(RECEIVE_BUFFER_SIZE); // [修正 2026/10] 再利用するパケットの受信長を毎回戻す
                 socket.receive(receivePacket);
             } catch (IOException e) {
                 Log.d("P2P", "エラー:"+e);
+                continue; // [修正 2026/10] 受信失敗時に前回のデータを再処理しない
             }
             String result = new String(receivePacket.getData(), 0, receivePacket.getLength());
             try{

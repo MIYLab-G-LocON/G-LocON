@@ -10,17 +10,17 @@ import org.json.JSONObject;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
-import java.util.ArrayList;
+import java.util.List;
 
 public class P2PNatRegisterSender extends AsyncTask<String, String, Integer> {
     private DatagramSocket socket;
     private String publicIP;
     private int publicPort;
     private EP2PProcess eP2PProcess;
-    private ArrayList<UserInfo> peripheralUsers;
+    private List<UserInfo> peripheralUsers; // [修正 2026/10] ArrayList → List（CopyOnWriteArrayList を受け取る）
     private UserInfo srcUser;
 
-    P2PNatRegisterSender(DatagramSocket socket, String publicIP, int publicPort, ArrayList<UserInfo> peripheralUsers, EP2PProcess eP2PProcess) {
+    P2PNatRegisterSender(DatagramSocket socket, String publicIP, int publicPort, List<UserInfo> peripheralUsers, EP2PProcess eP2PProcess) {
         this.socket = socket;
         this.publicIP = publicIP;
         this.publicPort = publicPort;

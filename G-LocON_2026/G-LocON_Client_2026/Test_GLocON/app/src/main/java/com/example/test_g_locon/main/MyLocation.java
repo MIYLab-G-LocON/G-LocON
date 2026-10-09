@@ -6,6 +6,7 @@ import android.content.pm.PackageManager;
 // [変更] android.location.LocationListener を使用（GMS LocationListenerから変更）
 import android.location.LocationListener;
 import android.location.LocationManager;
+import android.os.Looper;
 
 import androidx.core.content.ContextCompat;
 
@@ -39,7 +40,9 @@ public class MyLocation {
                     LocationManager.GPS_PROVIDER,
                     updateIntervalMs,   // 最小更新間隔(ms)
                     0f,                 // 最小移動距離(m)、0=制限なし
-                    locationListener
+                    locationListener,
+                    // [修正 2026/10] Looper の無いスレッドから呼ぶと例外になるため、メインスレッドの Looper を明示（コールバックもメインスレッドで実行される）
+                    Looper.getMainLooper()
             );
         }
     }
