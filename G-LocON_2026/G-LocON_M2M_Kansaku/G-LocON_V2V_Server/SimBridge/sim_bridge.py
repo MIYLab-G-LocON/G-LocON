@@ -675,6 +675,7 @@ class VirtualClient:
         self.count = 0
         self.next_tick = br.now()
         self.queried = False
+        self.color_iid = None              # sumo-gui で塗っている色の交差点（None = 灰色）
         # 車両制御用: 自分のルートの線（SUMO座標）と，急停止中なら送る危険情報
         self.path, self.cum, self.s_me = [], [], 0.0
         self.hazard = None
@@ -753,10 +754,10 @@ class VirtualClient:
                     br.stats["join_sent"] += 1
                     br.log("V_JOIN", self.peer, it.iid, f"eta={eta:.1f}")
                     br.pending_color.pop(self.vid, None)     # 前の交差点の色替え待ちは取り消す
-                    br.set_color(self.vid, it.iid)
                     self.show_state()
             elif it.joined and it.should_leave():
                 self.leave(it, lat, lon, "V_LEAVE")
+        self.update_color()
         for iid, t0 in self.last_keep.items():
             it = self.ix[iid]
             if it.joined and br.now() - t0 >= KEEPALIVE_SEC:
@@ -836,6 +837,28 @@ class VirtualClient:
         except Exception:
             pass
 
+    def next_group(self):
+        """色を付ける交差点: JOIN中のうち，まだ通過していない最初の交差点（＝これから入る交差点）.
+
+        複数の交差点に同時にJOINしているとき，後からJOINした先の交差点ではなく，手前の交差点の色にする。
+        JOIN中の交差点をすべて通過済みなら（離脱円を出るまで）その交差点，どこにもJOINしていなければ None.
+        """
+        joined = [i for i in self.ix.values() if i.joined]          # ルート順
+        ahead = [i for i in joined if not i.passed]
+        pick = ahead or joined
+        return pick[0].iid if pick else None
+
+    def update_color(self):
+        """JOIN や交差点の通過で「これから入る交差点」が変わったら色を替える（LEAVE 後の色替え待ちの間は待つ）."""
+        br = self.br
+        key = self.next_group()
+        if key == self.color_iid or self.vid in br.pending_color:
+            return
+        if key is None and self.color_iid is not None:
+            return                       # 灰色に戻すのは LEAVE の後（color_after_leave）だけ
+        self.color_iid = key
+        br.set_color(self.vid, key)
+
     def leave(self, it, lat, lon, ev):
         br = self.br
         it.joined, it.left = False, True
@@ -845,8 +868,12 @@ class VirtualClient:
         br.changed[(it.iid, self.peer)] = br.now()
         br.stats["leave_sent"] += 1
         br.log(ev, self.peer, it.iid, f"dist={it.dist:.0f}")
-        others = [i for i in self.ix.values() if i.joined]
-        br.color_after_leave(self.vid, others[0].iid if others else None, it.iid)
+        nxt = self.next_group()
+        if nxt == self.color_iid:
+            pass                         # 通過した時点で次の交差点の色に替えてある
+        else:
+            self.color_iid = nxt
+            br.color_after_leave(self.vid, nxt, it.iid)
         self.show_state()
 
     def on_message(self, msg, addr):
