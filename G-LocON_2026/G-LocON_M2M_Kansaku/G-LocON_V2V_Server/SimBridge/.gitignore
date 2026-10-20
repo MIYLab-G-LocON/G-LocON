@@ -1,3 +1,4 @@
 out/
 __pycache__/
 scenario/*.trips.xml
+results/eval/
