@@ -242,7 +242,11 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--plan", default="quick", help="quick / main / params / noise")
     ap.add_argument("--no-fig", action="store_true", help="グラフを作らない")
+    ap.add_argument("--root", default="", help="結果のフォルダ（既定 results/eval。eval_run.py --root と同じ値）")
     a = ap.parse_args()
+    global RESULT_ROOT
+    if a.root:
+        RESULT_ROOT = os.path.abspath(a.root)
 
     rows = load(a.plan)
     summ = summarize(rows)

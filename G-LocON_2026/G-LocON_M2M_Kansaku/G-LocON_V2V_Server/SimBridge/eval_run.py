@@ -6,10 +6,15 @@
     python eval_run.py --plan noise            # 補: 測位誤差の大きさ・変わり方（24実行）
     python eval_run.py --plan main --list      # 実行せず，条件の一覧だけ表示
     python eval_run.py --plan main --jobs 4    # 同時に4つ実行（PCのコア数に合わせる）
+    python eval_run.py --plan main --detail --root results/eval_detail
+                                               # 生データ（1秒ごとの全車の位置・接続の記録など）も残す（60実行で約1GB）
 
 1実行 = compare_schemes.py を1回（SUMO を1回走らせ，その走行の上で全方式の接続を計算する）。
 結果は results/eval/<plan>/<条件名>.csv に1実行ずつ保存する。途中で止めても，もう一度実行すれば
 済んだ分は飛ばして続きから始める（やり直すときは --force，または該当の csv を消す）。
+
+--detail のとき，各実行の生データを <root>/<plan>/raw/<条件名>/ に残す（列の説明は中の README_detail.txt）。
+後から CDF などの表・グラフを，走らせ直さずに作れる。
 
 集計（表・グラフ）は eval_report.py。手順は EVALUATION.md。
 """
@@ -86,7 +91,7 @@ def ensure_net(scenario):
     subprocess.run([sys.executable, "build_net.py"], cwd=HERE, env=env, check=True)
 
 
-def run_one(r, plan, gui):
+def run_one(r, plan, gui, detail=False):
     out_csv = os.path.join(RESULT_ROOT, plan, r["name"] + ".csv")
     tag = f"eval_{plan}_{r['name']}"
     sigma, corr = NOISE[r["noise"]]
@@ -97,6 +102,8 @@ def run_one(r, plan, gui):
            "--gps-noise", str(sigma), "--gps-corr", str(corr)]
     if gui:
         cmd.append("--gui")
+    if detail:
+        cmd.append("--detail")
     env = dict(os.environ, GLOCON_SCENARIO=MAPS[r["map"]][0], PYTHONIOENCODING="utf-8")
     log = os.path.join(RESULT_ROOT, plan, "logs", r["name"] + ".log")
     t0 = time.time()
@@ -116,6 +123,16 @@ def run_one(r, plan, gui):
         w.writeheader()
         for row in rows:
             w.writerow({"plan": plan, "run": r["name"], "map": r["map"], "traffic": r["traffic"], "noise": r["noise"], **row})
+    if detail:
+        # 生データを残す（集計の csv より先に置き，途中で止めても「済み」にならないようにする）
+        raw = os.path.join(RESULT_ROOT, plan, "raw", r["name"])
+        shutil.rmtree(raw, ignore_errors=True)
+        os.makedirs(os.path.dirname(raw), exist_ok=True)
+        shutil.copytree(os.path.join(HERE, "out", "compare_" + tag, "detail"), raw)
+        for fn in os.listdir(os.path.join(HERE, "out", "compare_" + tag)):
+            if fn.startswith("pairs_") and fn.endswith(".csv"):
+                shutil.copy(os.path.join(HERE, "out", "compare_" + tag, fn), raw)
+        shutil.copy(src, os.path.join(raw, "schemes.csv"))
     os.replace(out_csv + ".tmp", out_csv)
     shutil.rmtree(os.path.join(HERE, "out", "compare_" + tag), ignore_errors=True)   # 中間ファイル（数百MBになる）を消す
     return r["name"], True, time.time() - t0, log
@@ -129,7 +146,13 @@ def main():
     ap.add_argument("--force", action="store_true", help="済んだ分もやり直す")
     ap.add_argument("--gui", action="store_true", help="sumo-gui で走行を表示する（説明用。--jobs 1 になる）")
     ap.add_argument("--only", default="", help="条件名にこの文字列を含むものだけ実行する（例: campus_mid）")
+    ap.add_argument("--detail", action="store_true",
+                    help="生データ（1秒ごとの全車の位置・接続の記録など）も <root>/<plan>/raw/ に残す")
+    ap.add_argument("--root", default="", help="結果を置くフォルダ（既定 results/eval）。前の結果を残したまま別に走らせるとき")
     a = ap.parse_args()
+    global RESULT_ROOT
+    if a.root:
+        RESULT_ROOT = os.path.abspath(a.root)
 
     runs = [r for r in plan_runs(a.plan) if a.only in r["name"]]
     os.makedirs(os.path.join(RESULT_ROOT, a.plan, "logs"), exist_ok=True)
@@ -149,7 +172,7 @@ def main():
     jobs = 1 if a.gui else max(1, a.jobs)
     t0, n_ok = time.time(), 0
     with ThreadPoolExecutor(max_workers=jobs) as ex:
-        futs = [ex.submit(run_one, r, a.plan, a.gui) for r in todo]
+        futs = [ex.submit(run_one, r, a.plan, a.gui, a.detail) for r in todo]
         for i, fu in enumerate(as_completed(futs), 1):
             name, ok, sec, log = fu.result()
             n_ok += ok

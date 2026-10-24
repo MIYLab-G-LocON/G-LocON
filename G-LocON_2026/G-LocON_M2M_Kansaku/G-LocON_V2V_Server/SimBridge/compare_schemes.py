@@ -21,6 +21,7 @@
 出力 out/compare_<tag>/:
     schemes.csv   方式ごとの指標（下記）
     pairs_<方式>.csv  交差点で出会った2台ごとの「つながっていたか・何秒前からか」
+    detail/       --detail のときだけ。後から表・グラフ（CDF など）を作り直すための生データ（README_detail.txt に列の説明）
 
 指標:
     peers_mean / peers_p95  1台が同時につながっている相手の数（平均・95%）
@@ -69,6 +70,8 @@
 import argparse
 import random
 import csv
+import gzip
+import json
 import itertools
 import math
 import os
@@ -119,6 +122,12 @@ class Scheme:
         self.gap = {}               # (a,b) -> [前の接続が切れた時刻, 切れている間の最小距離, 最大距離]
         self.ended = []             # 終わった接続の記録（上に dur: 続いた秒数 を足したもの）
         self.enc = []               # すれ違い [(近づく速さ, 何秒前からつながっていたか or None)]
+        self.events = None          # --detail のとき: サーバとのやり取りの記録（list）。None なら記録しない
+
+    def ev(self, t, veh, kind, msgs, iid="", dist=None, spd=None, eta=None, trigger="", members=None, new=None):
+        """サーバとのやり取り1件を記録する（--detail のときだけ）. 集計には使わない."""
+        if self.events is not None:
+            self.events.append((t, self.name, veh, kind, iid, msgs, dist, spd, eta, trigger, members, new))
 
     def connected(self):
         s = set()
@@ -154,7 +163,7 @@ class Scheme:
                 if noshare:
                     self.noshare += 1       # ルートが1か所も交わらない相手との接続
                 g = self.gap.pop(p, None)
-                self.cur[p] = {"pair": p, "k": k, "mind": 1e9, "noshare": noshare,
+                self.cur[p] = {"pair": p, "start": now, "k": k, "mind": 1e9, "noshare": noshare,
                                "gap": None if g is None else now - g[0],
                                "gap_mind": None if g is None else g[1],
                                "gap_change": None if g is None else g[2] - g[1]}
@@ -192,16 +201,19 @@ class EtaScheme(Scheme):
         self.dnoise = {}                # 車 -> 交差点までの道のりの測位誤差 [m]（--gps-noise のとき）
 
     def update(self, t, now, alive, xy, speed):
-        for v in alive:
+        order = sorted(alive)               # 車の順を固定する（同じ秒の参加・離脱の順で通知の数が変わるため。2026/10/24）
+        for v in order:
             if v not in self.asked:           # ルートが決まったら MasterServer に問い合わせる（往復2通）
                 self.asked.add(v)
                 self.ctrl += 2
+                self.ev(now, v, "query", 2)
         for iid, (jx, jy) in self.j.items():
             mem = self.members[iid]
-            for v in [m for m in mem if m not in alive]:
+            for v in sorted(m for m in mem if m not in alive):
                 mem.discard(v)
                 self.ctrl += 1 + len(mem)      # LEAVE + 残りのメンバーへの離脱通知
-            for v in alive:
+                self.ev(now, v, "leave_arrived", 1 + len(mem), iid, members=len(mem))
+            for v in order:
                 if v not in mem and iid not in self.routes.targets(v):
                     continue                   # この交差点を通らない車
                 eu = math.hypot(xy[v][0] - jx, xy[v][1] - jy)
@@ -209,12 +221,15 @@ class EtaScheme(Scheme):
                 self.prev[(iid, v)] = eu
                 d = self.routes.distance(v, iid)
                 if eu <= PASS_RADIUS_M or (v in mem and d is None):
+                    if (iid, v) not in self.passed:
+                        self.ev(now, v, "pass", 0, iid, eu, speed[v], members=len(mem))
                     self.passed.add((iid, v))  # アプリと同じ: 20m まで近づいたら（または交差点を過ぎたら）通過済み
                 if v in mem:
                     # 離脱はアプリと同じ3条件: 通過済み・δ 以上離れた・遠ざかっている
                     if (iid, v) in self.passed and eu >= self.delta and prev is not None and eu > prev:
                         mem.discard(v)
                         self.ctrl += 1 + len(mem)
+                        self.ev(now, v, "leave", 1 + len(mem), iid, eu, speed[v], members=len(mem))
                     continue
                 if d is None:
                     continue
@@ -224,9 +239,15 @@ class EtaScheme(Scheme):
                     d = max(d + self.dnoise.get(v, 0.0), 0.0)
                 if d / max(speed[v], 1.0) < self.tau or eu < self.join_dist:
                     self.ctrl += 2 + len(mem)  # JOIN + メンバー一覧の返信 + 既存メンバーへの参加通知
+                    if self.events is not None:
+                        eta = d / max(speed[v], 1.0)
+                        trig = "both" if eta < self.tau and eu < self.join_dist else ("tau" if eta < self.tau else "rho")
+                        self.ev(now, v, "join", 2 + len(mem), iid, eu, speed[v], eta, trig, len(mem) + 1)
                     mem.add(v)
         # 接続維持（KEEPALIVE）: 参加中のグループ1つにつき，車がエッジサーバへ15秒ごとに1通送る（アプリと同じ）
-        self.ctrl += sum(len(mem) for mem in self.members.values()) / KEEPALIVE_SEC
+        ka = sum(len(mem) for mem in self.members.values()) / KEEPALIVE_SEC
+        self.ctrl += ka
+        self.ev(now, "", "keepalive", ka)      # 全車の合計（毎秒1行）
         self.peers = {}
         for mem in self.members.values():
             for v in mem:
@@ -266,6 +287,7 @@ class DistScheme(Scheme):
             old = self.peers.get(v, set())
             # 問い合わせ（往復2通）+ 新しい相手1台につき，サーバ経由の接続依頼とその相手からの登録（2通）
             self.ctrl += 2 + 2 * len(new - old)
+            self.ev(now, v, "search", 2 + 2 * len(new - old), dist=None, spd=speed[v], members=len(new), new=len(new - old))
             self.peers[v] = new
 
 
@@ -363,6 +385,165 @@ def upcoming(t, v, route, to_node, horizon):
     return out
 
 
+def _f(x, nd=2):
+    """CSV 用の数値（None は空欄）."""
+    if x is None:
+        return ""
+    if isinstance(x, float):
+        return f"{x:.{nd}f}"
+    return x
+
+
+class Detail:
+    """--detail: 後から表・グラフ（CDF など）を作り直すための生データを detail/ に書き出す.
+
+    集計（schemes.csv）には一切影響しない（読み出すだけで，SUMO の走行や乱数は変えない）。
+    大きいファイルは gzip 圧縮した CSV（.csv.gz。pandas.read_csv でそのまま読める）。
+    """
+
+    def __init__(self, d, schemes, net, a, cmd, jids, junction_xy):
+        os.makedirs(d, exist_ok=True)
+        self.d, self.schemes, self.net = d, schemes, net
+        for sc in schemes:
+            sc.events = []
+        self.eta = [sc for sc in schemes if isinstance(sc, EtaScheme)]
+        self.veh = {}           # 車 -> 記録
+        self.ts = gzip.open(os.path.join(d, "timeseries.csv.gz"), "wt", newline="", encoding="utf-8")
+        self.tw = csv.writer(self.ts, lineterminator="\n")
+        self.tw.writerow(["t", "veh", "x", "y", "lon", "lat", "x_obs", "y_obs", "lon_obs", "lat_obs",
+                          "speed", "accel", "angle", "edge", "lane_pos"]
+                         + [f"n_{sc.name}" for sc in schemes] + [f"groups_{sc.name}" for sc in self.eta])
+        self.enc = []
+        with open(os.path.join(d, "edge_servers.csv"), "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f, lineterminator="\n")
+            w.writerow(["intersection", "junction", "x", "y", "lon", "lat"])
+            for iid, j in jids.items():
+                x, y = junction_xy[iid]
+                lon, lat = net.convertXY2LonLat(x, y)
+                w.writerow([iid, j, f"{x:.2f}", f"{y:.2f}", f"{lon:.7f}", f"{lat:.7f}"])
+        meta = {"args": vars(a), "sumo_cmd": cmd, "scenario": os.environ.get("GLOCON_SCENARIO", ""),
+                "schemes": [sc.name for sc in schemes],
+                "constants": {"PASS_RADIUS_M": PASS_RADIUS_M, "KEEPALIVE_SEC": KEEPALIVE_SEC, "REACT_SEC": REACT_SEC,
+                              "DECEL_INFO": DECEL_INFO, "APPROACH_WINDOW": APPROACH_WINDOW, "MEET_WINDOW": MEET_WINDOW,
+                              "CLOSE_M": CLOSE_M, "NEAR_ES_M": NEAR_ES_M, "FAR_M": FAR_M, "SHORT_SEC": SHORT_SEC}}
+        with open(os.path.join(d, "run_meta.json"), "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=1, default=str)
+
+    def vehicle_seen(self, v, now, route, routes):
+        self.veh[v] = {"first": now, "last": now, "route": route, "es": list(routes.targets(v).keys()),
+                       "n": 0, "dist": 0.0, "vmax": 0.0}
+
+    def second(self, traci, now, alive, xy, xy_obs, speed, head, new_close):
+        groups = []
+        for sc in self.eta:
+            g = {}
+            for iid, mem in sc.members.items():
+                for v in mem:
+                    g.setdefault(v, []).append(str(iid))
+            groups.append(g)
+        conv = self.net.convertXY2LonLat
+        for v in sorted(alive):
+            x, y = xy[v]
+            xo, yo = xy_obs[v]
+            lon, lat = conv(x, y)
+            lono, lato = (lon, lat) if xy_obs is xy else conv(xo, yo)
+            r = self.veh.get(v)
+            if r is not None:
+                r["last"] = now
+                r["n"] += 1
+                r["dist"] += speed[v]
+                r["vmax"] = max(r["vmax"], speed[v])
+            self.tw.writerow([f"{now:.0f}", v, f"{x:.2f}", f"{y:.2f}", f"{lon:.7f}", f"{lat:.7f}",
+                              f"{xo:.2f}", f"{yo:.2f}", f"{lono:.7f}", f"{lato:.7f}",
+                              f"{speed[v]:.2f}", f"{traci.vehicle.getAcceleration(v):.2f}", f"{head[v]:.1f}",
+                              traci.vehicle.getRoadID(v), f"{traci.vehicle.getLanePosition(v):.1f}"]
+                             + [len(sc.peers.get(v, ())) for sc in self.schemes]
+                             + [";".join(g.get(v, ())) for g in groups])
+        for p, closing, kind, near in new_close:
+            self.enc.append([f"{now:.0f}", p[0], p[1], f"{closing:.2f}", kind, int(near)]
+                            + [_f(now - sc.since[p], 0) if p in sc.since else "" for sc in self.schemes])
+
+    def connections(self, name, ended):
+        with gzip.open(os.path.join(self.d, f"connections_{name}.csv.gz"), "wt", newline="", encoding="utf-8") as f:
+            w = csv.writer(f, lineterminator="\n")
+            w.writerow(["a", "b", "start", "end", "dur", "open", "k", "min_dist", "noshare",
+                        "gap_before", "gap_min_dist", "gap_change"])
+            for c in sorted(ended, key=lambda c: (c["start"], c["pair"])):
+                w.writerow([c["pair"][0], c["pair"][1], _f(c["start"], 0), _f(c["start"] + c["dur"], 0), _f(c["dur"], 0),
+                            c.get("open", 0), c["k"], _f(c["mind"] if c["mind"] < 1e8 else None, 1), int(c["noshare"]),
+                            _f(c["gap"], 0), _f(c["gap_mind"], 1), _f(c["gap_change"], 1)])
+
+    def finish(self, end_t, meets, es_nodes, foll, hazards):
+        self.ts.close()
+        names = [sc.name for sc in self.schemes]
+        with gzip.open(os.path.join(self.d, "events.csv.gz"), "wt", newline="", encoding="utf-8") as f:
+            w = csv.writer(f, lineterminator="\n")
+            w.writerow(["t", "scheme", "veh", "event", "intersection", "msgs", "dist_obs_m", "speed", "eta_s",
+                        "trigger", "members", "new_peers"])
+            for sc in self.schemes:
+                for e in sc.events:
+                    w.writerow([_f(e[0], 0), e[1], e[2], e[3], e[4], _f(e[5], 4) if isinstance(e[5], float) else e[5],
+                                _f(e[6], 1), _f(e[7]), _f(e[8], 2), e[9], _f(e[10]), _f(e[11])])
+        with gzip.open(os.path.join(self.d, "encounters.csv.gz"), "wt", newline="", encoding="utf-8") as f:
+            w = csv.writer(f, lineterminator="\n")
+            w.writerow(["t", "a", "b", "closing_speed", "kind", "near_es"] + [f"lead_{n}" for n in names])
+            w.writerows(self.enc)
+        with open(os.path.join(self.d, "meets.csv"), "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f, lineterminator="\n")
+            w.writerow(["junction", "edge_server", "t1", "a", "t2", "b"])
+            for node, t1, v1, v2, t2 in meets:
+                w.writerow([node, int(node in es_nodes), _f(t1, 1), v1, _f(t2, 1), v2])
+        with open(os.path.join(self.d, "hazard_followers.csv"), "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f, lineterminator="\n")
+            w.writerow(["hazard_veh", "t0", "follower"] + [f"conn_dist_{n}" for n in names])
+            for (hv, t0, m), d in sorted(foll.items(), key=lambda kv: (kv[0][1], kv[0][0], kv[0][2])):
+                w.writerow([hv, _f(t0, 1), m] + [_f(d.get(n), 1) for n in names])
+        with open(os.path.join(self.d, "vehicles.csv"), "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f, lineterminator="\n")
+            w.writerow(["veh", "first_t", "last_t", "seconds", "dist_m", "mean_speed", "max_speed",
+                        "n_edges", "es_on_route", "route"])
+            for v, r in sorted(self.veh.items(), key=lambda kv: kv[1]["first"]):
+                w.writerow([v, _f(r["first"], 1), _f(r["last"], 1), r["n"], _f(r["dist"], 1),
+                            _f(r["dist"] / max(r["n"], 1)), _f(r["vmax"]), len(r["route"]),
+                            ";".join(map(str, r["es"])), " ".join(r["route"])])
+        with open(os.path.join(self.d, "README_detail.txt"), "w", encoding="utf-8") as f:
+            f.write(README_DETAIL)
+
+
+README_DETAIL = """detail/ の中身（compare_schemes.py --detail）
+位置はすべて SUMO 座標 [m]（x: 東, y: 北）と緯度経度。車の位置は車体の中心（common.vehicle_xy）。
+方式名: eta_t<τ>_j<ρ>_d<δ> = 本システム，dist_r<R> = 従来G-LocON（半径 R m）。
+
+timeseries.csv.gz   1秒ごと・走行中の全車1行
+  t, veh, x, y, lon, lat          正しい位置
+  x_obs, y_obs, lon_obs, lat_obs  測位誤差を加えた位置（接続の判断に使った位置。誤差なしの条件では正しい位置と同じ）
+  speed [m/s], accel [m/s^2], angle [度, 北=0 時計回り], edge（道路ID），lane_pos [m]
+  n_<方式>        その時点でつながっている相手の数（schemes.csv の peers_mean の元）
+  groups_<本システム>  参加しているエッジサーバ交差点の ID（; 区切り）
+connections_<方式>.csv.gz   接続1回ごとに1行（2台の組 a<b）
+  start, end, dur [秒]  つながった時刻・切れた時刻・続いた時間（conn_sec_median の元）
+  open=1          走行の終わりまで続いていた（end は SUMO の終了時刻）
+  k               その2台の何回目の接続か（2以上 = つなぎ直し）
+  min_dist        接続の間に最も近づいた距離 [m]（正しい位置）
+  noshare=1       2台のルートが1か所も交わらない
+  gap_before, gap_min_dist, gap_change  つなぎ直しのとき，前の接続が切れてからの秒数・その間の最小距離・距離の変化幅
+events.csv.gz       サーバとのやり取り（制御メッセージ）
+  event: query（MasterServer への問い合わせ）, join, leave（通過して δ 離れ遠ざかった）, leave_arrived（参加中に走り終えた）,
+         pass（交差点を通過済みになった。メッセージなし）, keepalive（毎秒，全車の合計。15秒に1通を毎秒に割った値）,
+         search（従来G-LocON の問い合わせ）
+  msgs            その出来事で数えたメッセージ数（ctrl_per_veh_min の元）
+  dist_obs_m      交差点までの直線距離（測位誤差つきの位置で）, speed, eta_s = 距離 ÷ max(速度, 1)
+  trigger         join の理由: tau（ETA<τ）, rho（距離<ρ）, both
+  members         出来事の後のグループの人数（search では見つかった車の数）, new_peers（search で新しく見つかった車の数）
+encounters.csv.gz   すれ違い（2台の距離が初めて 30m 未満になった時点）。lead_<方式> = その時点で何秒前からつながっていたか（空欄 = つながっていない）
+meets.csv           交差点で出会った2台（同じ交差点を 5秒以内に続けて通った）。edge_server=1 はエッジサーバのある交差点
+hazard_followers.csv  急停止した車と後ろから近づいた車。conn_dist_<方式> = つながった時点の距離 [m]（空欄 = つながらなかった）
+vehicles.csv        車1台ごと: 走行時間，距離，平均・最高速度，ルートが通るエッジサーバ交差点，ルート（道路ID）
+edge_servers.csv    エッジサーバ交差点の位置
+run_meta.json       実行の条件（引数，定数，SUMO のコマンド）
+"""
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seed", type=int, default=1)
@@ -394,6 +575,8 @@ def main():
     ap.add_argument("--trip-seed", type=int, default=1, help="交通流（出発地・目的地）の乱数")
     ap.add_argument("--es-count", type=int, default=None, help="エッジサーバの数（指定すると交通量の多い順にその場で選ぶ）")
     ap.add_argument("--es-spacing", type=float, default=200.0, help="エッジサーバどうしの最小距離 [m]（--es-count のとき）")
+    ap.add_argument("--detail", action="store_true",
+                    help="後から表・グラフを作り直すための生データ（1秒ごとの全車の位置・接続の記録など）を out/compare_<tag>/detail/ に書き出す")
     a = ap.parse_args()
 
     common.sumo_home()
@@ -434,6 +617,10 @@ def main():
         schemes = [EtaScheme(float(tau), float(dl), junction_xy, routes, float(jd), a.eta_by)
                    for tau in a.taus.split(",") for dl in a.deltas.split(",") for jd in a.join_dists.split(",")]
     schemes += [DistScheme(float(r), a.search_period) for r in a.radii.split(",")]
+
+    det = None
+    if a.detail:
+        det = Detail(os.path.join(out, "detail"), schemes, net, a, cmd, jids, junction_xy)
 
     if a.no_hazards:
         hazards = []
@@ -504,6 +691,8 @@ def main():
         for v in alive:
             if v not in veh_route:
                 veh_route[v] = traci.vehicle.getRoute(v)
+                if det:
+                    det.vehicle_seen(v, now, veh_route[v], routes)
                 veh_nodes[v] = {to_node[e][0] for e in veh_route[v]} | {net.getEdge(veh_route[v][0]).getFromNode().getID()}
             idx = traci.vehicle.getRouteIndex(v)
             li = last_idx.get(v)
@@ -521,7 +710,7 @@ def main():
         speed = {v: traci.vehicle.getSpeed(v) for v in alive}
         if a.speed_wobble > 0:
             # 1台の中での速度のゆらぎ: 希望速度（speedFactor）を少しずつ上下させる。車間の保ち方は車両モデルのまま
-            for v in alive:
+            for v in sorted(alive):            # 車の順を固定する（集合の順は実行ごとに変わり，乱数の割り当てが変わるため）
                 w = wob.get(v)
                 if w is None:
                     w = wob[v] = [traci.vehicle.getSpeedFactor(v), nrng.gauss(0, a.speed_wobble)]
@@ -532,7 +721,7 @@ def main():
         if a.gps_noise > 0:
             # 測位誤差: 各車が自分の位置として知る値（接続の判断に使う）。評価は正しい位置 xy で行う
             xy_obs = {}
-            for v in alive:
+            for v in sorted(alive):            # 車の順を固定する（2026/10/24。これより前は実行ごとに誤差の割り当てが少し変わった）
                 e = gps_err.get(v)
                 if e is None:
                     e = gps_err[v] = [nrng.gauss(0, a.gps_noise), nrng.gauss(0, a.gps_noise)]
@@ -622,6 +811,8 @@ def main():
             for key, p, d in behind:
                 if p in cur and sc.name not in foll[key]:
                     foll[key][sc.name] = d
+        if det:
+            det.second(traci, now, alive, xy, xy_obs, speed, head, new_close)
     traci.close()
 
     # 交差点で出会った2台（同じ交差点を MEET_WINDOW 秒以内に続けて通った，別々の車）
@@ -692,7 +883,10 @@ def main():
         ended = list(sc.ended)
         for p, t0 in sc.since.items():
             c = dict(sc.cur[p]); c["dur"] = end_t - t0
+            c["open"] = 1               # 走行の終わりまで続いていた接続
             ended.append(c)
+        if det:
+            det.connections(sc.name, ended)
         n_end = max(len(ended), 1)
         npairs = max(len(sc.pair_times), 1)
 
@@ -751,6 +945,9 @@ def main():
         res["hz_coverage"] = round(100 * len(gaps) / max(len(foll), 1), 1)
         res["hz_gap_median"] = round(gaps[len(gaps) // 2], 1) if gaps else None
         rows.append(res)
+
+    if det:
+        det.finish(end_t, meets, es_nodes, foll, hazards)
 
     keys = list(rows[0].keys())
     with open(os.path.join(out, "schemes.csv"), "w", newline="", encoding="utf-8") as f:

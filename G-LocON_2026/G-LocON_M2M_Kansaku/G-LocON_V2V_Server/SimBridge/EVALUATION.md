@@ -75,6 +75,26 @@ python eval_report.py --plan main            # 表・グラフ
 - やり直す: `--force`，または `results\eval\main\<条件名>.csv` を消す。
 - 幹線道路の地図（`scenario_arterial\area.net.xml`）が無ければ，最初に自動で作る。
 
+### 3.4 生データも残す正式評価（CDF など後から図を作るため）
+
+`eval_4_main_detail.bat`（= `python eval_run.py --plan main --jobs 4 --detail --root results\eval_detail`）。
+条件と乱数は `main` と同じ。2026/10/24 に実行ごとの結果のぶれを直したため（EXPERIMENTS.md E16），測位誤差ありの条件の値は E14 からわずかに変わる。結果は `results\eval_detail\main\` に置き，
+前の `results\eval\main\` は残る。60実行で約1GB（GitHub には上げない。`.gitignore` 済み）。
+
+各実行の生データは `results\eval_detail\main\raw\<条件名>\` に入る（列の説明は中の `README_detail.txt`）:
+
+| ファイル | 内容 |
+|---|---|
+| `timeseries.csv.gz` | 1秒ごと・全車: 正しい位置と測位誤差つきの位置（SUMO座標・緯度経度），速度，向き，道路，方式ごとの接続数，参加中の交差点 |
+| `connections_<方式>.csv.gz` | 接続1回ごと: 2台，開始・終了・続いた時間，何回目か，最も近づいた距離 など |
+| `events.csv.gz` | サーバとのやり取り: 問い合わせ・参加（理由 τ/ρ）・離脱・通過・接続維持・従来方式の検索と，そのメッセージ数 |
+| `encounters.csv.gz` / `meets.csv` | すれ違い・交差点で出会った2台と，方式ごとに何秒前からつながっていたか |
+| `hazard_followers.csv` / `vehicles.csv` / `edge_servers.csv` / `run_meta.json` | 急停止と後続車，車ごとの情報，エッジサーバの位置，実行条件 |
+
+`.csv.gz` は pandas でそのまま読める（`pd.read_csv("timeseries.csv.gz")`）。Excel で見るときは 7-Zip などで展開する。
+
+接続時間・接続数の CDF: `python eval_cdf.py --root results\eval_detail --plan main`（`report_cdf\` に図と分位点の表）。
+
 ## 4. 結果の見方
 
 `results\eval\<計画>\` に1実行ごとの csv（1行 = 1方式），`report\` に集計ができる。
