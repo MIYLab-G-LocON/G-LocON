@@ -93,7 +93,8 @@ python eval_report.py --plan main            # 表・グラフ
 
 `.csv.gz` は pandas でそのまま読める（`pd.read_csv("timeseries.csv.gz")`）。Excel で見るときは 7-Zip などで展開する。
 
-接続時間・接続数の CDF: `python eval_cdf.py --root results\eval_detail --plan main`（`report_cdf\` に図と分位点の表）。
+接続時間・接続数の CDF: `python eval_cdf.py --root results\eval_detail --plan main`（`report_cdf\` に度数分布 `cdf_hist.csv` と分位点の表 `cdf_values.csv`。
+matplotlib があれば図も描く。無ければ `python eval_cdf.py --from-hist cdf_hist.csv --out <フォルダ>` で別の PC で描ける）。
 
 ## 4. 結果の見方
 
