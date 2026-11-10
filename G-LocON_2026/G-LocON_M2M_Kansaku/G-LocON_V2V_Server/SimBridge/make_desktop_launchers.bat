@@ -14,6 +14,8 @@ for /f "usebackq delims=" %%D in (`powershell -NoProfile -Command "[Environment]
 >> "%DESK%\GLocON_2_sumo_phones3.bat" echo call "%~dp0run_bridge_A_phones3.bat"
 > "%DESK%\GLocON_2_sumo_pc_only.bat" echo @echo off
 >> "%DESK%\GLocON_2_sumo_pc_only.bat" echo call "%~dp0run_bridge_pc_only.bat"
+> "%DESK%\GLocON_3_eval_5_cdf_figs.bat" echo @echo off
+>> "%DESK%\GLocON_3_eval_5_cdf_figs.bat" echo call "%~dp0eval_5_cdf_figs.bat"
 echo Created launchers on %DESK%:
 dir /b "%DESK%\GLocON_*.bat"
 pause

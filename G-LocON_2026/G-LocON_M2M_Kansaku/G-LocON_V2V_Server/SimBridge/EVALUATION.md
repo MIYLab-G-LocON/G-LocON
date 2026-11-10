@@ -96,6 +96,18 @@ python eval_report.py --plan main            # 表・グラフ
 接続時間・接続数の CDF: `python eval_cdf.py --root results\eval_detail --plan main`（`report_cdf\` に度数分布 `cdf_hist.csv` と分位点の表 `cdf_values.csv`。
 matplotlib があれば図も描く。無ければ `python eval_cdf.py --from-hist cdf_hist.csv --out <フォルダ>` で別の PC で描ける）。
 
+論文・報告用の CDF の図と数値: `eval_5_cdf_figs.bat`（= `eval_cdf.py` で生データから数え直し，`eval_cdf_figs.py` で描く）。
+`report_cdf\figs\` に次を出す（図には matplotlib が要る。無ければ `setup_matplotlib.bat` で入れる）:
+
+| ファイル | 内容 |
+|---|---|
+| `fig_cdf.pdf` | 論文の図（大学周辺・交通量中と幹線道路・交通量多，測位誤差5 m） |
+| `rep_cdf_dur_all.pdf` / `rep_cdf_peers_all.pdf` | 報告用：接続の継続時間・同時接続数（全6条件，測位誤差5 m） |
+| `rep_cdf_gps.pdf` | 報告用：測位誤差の有無の比較（交通量多の2条件） |
+| `cdf_numbers.csv` | 論文に書いた数値（中央値，10 s以下・60 s以上の割合，接続相手0台の時間，90パーセンタイル）。全条件・全方式 |
+
+CDF は，値ごとの件数（度数分布）を小さい値から足し上げて全件数で割ったもの。接続時間・接続数は整数なので誤差なく作れる。
+
 ## 4. 結果の見方
 
 `results\eval\<計画>\` に1実行ごとの csv（1行 = 1方式），`report\` に集計ができる。
