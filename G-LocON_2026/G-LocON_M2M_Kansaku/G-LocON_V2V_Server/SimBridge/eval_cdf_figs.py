@@ -29,11 +29,17 @@ from collections import Counter
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_HIST = os.path.join(HERE, "results", "eval_detail", "main", "report_cdf", "cdf_hist.csv")
 
-PROPOSED = "eta_t15_j100_d100"
-LINES = {PROPOSED: ("提案方式", "k", "-", 1.3),
-         "dist_r100": ("従来 100 m", "#555555", (0, (4, 2)), 0.9),
-         "dist_r150": ("従来 150 m", "#9a9a9a", "-", 0.9),
-         "dist_r200": ("従来 200 m", "#555555", (0, (1, 1.2)), 0.9)}
+PROPOSED = "eta_t15_j100_d100"          # 図に描く本システムの条件（--proposed で変える。例 eta_t20_j100_d100）
+
+
+def make_lines(proposed):
+    return {proposed: ("提案方式", "k", "-", 1.3),
+            "dist_r100": ("従来 100 m", "#555555", (0, (4, 2)), 0.9),
+            "dist_r150": ("従来 150 m", "#9a9a9a", "-", 0.9),
+            "dist_r200": ("従来 200 m", "#555555", (0, (1, 1.2)), 0.9)}
+
+
+LINES = make_lines(PROPOSED)
 CONDS = [("campus_low", "大学周辺・交通量少"), ("campus_mid", "大学周辺・交通量中"), ("campus_high", "大学周辺・交通量多"),
          ("arterial_low", "幹線道路・交通量少"), ("arterial_mid", "幹線道路・交通量中"), ("arterial_high", "幹線道路・交通量多")]
 XLABEL = {"conn_dur": "接続の継続時間 [s]", "peers": "同時接続数 [台]"}
@@ -185,10 +191,14 @@ def write_numbers(hist, out):
 
 
 def main():
+    global PROPOSED, LINES
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--hist", default=DEFAULT_HIST, help="eval_cdf.py が出した cdf_hist.csv")
     ap.add_argument("--out", default="", help="出力先（既定 <cdf_hist.csv のフォルダ>/figs）")
+    ap.add_argument("--proposed", default=PROPOSED,
+                    help="図に描く本システムの条件（既定 eta_t15_j100_d100。τ=20 なら eta_t20_j100_d100）")
     a = ap.parse_args()
+    PROPOSED, LINES = a.proposed, make_lines(a.proposed)
     out = a.out or os.path.join(os.path.dirname(os.path.abspath(a.hist)), "figs")
     os.makedirs(out, exist_ok=True)
 

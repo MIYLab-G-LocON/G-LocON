@@ -57,11 +57,16 @@ PARAM_SETS = ["15:100:100",
               "15:100:30", "15:100:60", "15:100:150"]        # δ
 
 
-def plan_runs(plan):
-    """[{name, map, traffic, period, noise, seed, etas, radii}]"""
-    runs = []
+def plan_runs(plan, taus=None):
+    """[{name, map, traffic, period, noise, seed, etas, radii}]
 
-    def add(m, traffic, noise, seed, etas=PROPOSED, radii=RADII):
+    taus: 本システムの τ を複数まとめて計算するとき（例 "15,20"）。ρ=δ=100m で，1回の SUMO の走行の上で同時に計算する
+    （quick / main / noise のみ。params は τ・ρ・δ を1つずつ変える計画なので使わない）
+    """
+    runs = []
+    proposed = ",".join(f"{t}:100:100" for t in taus.split(",")) if taus else PROPOSED
+
+    def add(m, traffic, noise, seed, etas=proposed, radii=RADII):
         runs.append({"name": f"{m}_{traffic}_{noise}_s{seed}", "map": m, "traffic": traffic,
                      "period": MAPS[m][1][traffic], "noise": noise, "seed": seed, "etas": etas, "radii": radii})
 
@@ -155,6 +160,8 @@ def main():
     ap.add_argument("--detail", action="store_true",
                     help="生データ（1秒ごとの全車の位置・接続の記録など）も <root>/<plan>/raw/ に残す")
     ap.add_argument("--root", default="", help="結果を置くフォルダ（既定 results/eval_path，--eta-by line なら results/eval）")
+    ap.add_argument("--taus", default="",
+                    help="本システムの τ を複数まとめて計算する（例 15,20。既定は 15 だけ）。ρ=δ=100m。同じ走行の上で計算するので時間はほぼ変わらない")
     ap.add_argument("--eta-by", choices=["path", "line"], default="path",
                     help="本システムの ETA の距離。path = ルートに沿った道のり（既定。今のアプリ），line = 直線距離（E14〜E16）")
     a = ap.parse_args()
@@ -165,7 +172,7 @@ def main():
         RESULT_ROOT = os.path.join(HERE, "results", "eval_path")
     print(f"ETA の距離: {'ルートに沿った道のり' if a.eta_by == 'path' else '直線距離'}（--eta-by {a.eta_by}），結果: {RESULT_ROOT}")
 
-    runs = [r for r in plan_runs(a.plan) if a.only in r["name"]]
+    runs = [r for r in plan_runs(a.plan, a.taus or None) if a.only in r["name"]]
     os.makedirs(os.path.join(RESULT_ROOT, a.plan, "logs"), exist_ok=True)
     todo = [r for r in runs if a.force or not os.path.exists(os.path.join(RESULT_ROOT, a.plan, r["name"] + ".csv"))]
     print(f"計画 {a.plan}: 全 {len(runs)} 実行，済み {len(runs) - len(todo)}，これから {len(todo)}")
