@@ -14,6 +14,7 @@ if errorlevel 1 (
 python eval_cdf.py --plan main --root results\eval_detail
 python eval_cdf_figs.py --hist results\eval_detail\main\report_cdf\cdf_hist.csv
 echo.
+echo fig_cdf.pdf = CDF (log axis for duration), fig_bars.pdf = control messages and decision margin (bars)
 echo Figures and numbers: results\eval_detail\main\report_cdf\figs
 start "" "results\eval_detail\main\report_cdf\figs"
 pause

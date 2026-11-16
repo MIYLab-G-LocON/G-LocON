@@ -13,6 +13,7 @@ python eval_cdf.py --plan main --root results\eval_detail_path
 python eval_cdf_figs.py --hist results\eval_detail_path\main\report_cdf\cdf_hist.csv --proposed eta_t15_j100_d100 --out results\eval_detail_path\main\report_cdf\figs_t15
 python eval_cdf_figs.py --hist results\eval_detail_path\main\report_cdf\cdf_hist.csv --proposed eta_t20_j100_d100 --out results\eval_detail_path\main\report_cdf\figs_t20
 echo.
+echo fig_cdf.pdf = CDF (log axis for duration), fig_bars.pdf = control messages and decision margin (bars)
 echo Figures and numbers: results\eval_detail_path\main\report_cdf\figs_t15 and figs_t20
 start "" "results\eval_detail_path\main\report_cdf"
 pause
