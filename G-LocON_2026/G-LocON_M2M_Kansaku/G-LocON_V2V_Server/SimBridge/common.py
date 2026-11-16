@@ -41,6 +41,92 @@ LEAVE_DIST_M = 100.0     # δ（離脱円の半径）: 通過後，交差点か�
                          # 評価では 30 / 60 / 100 / 150m を比較する（sim_bridge.py・run_scenario.py の --leave-dist）
 
 
+class RouteTrack:
+    """ルートの線（折れ線）に沿った道のりの計算。ETA の距離に使う（2026/11/16 に直線距離から変更）.
+
+    アプリの RouteGeometry.Track と同じ規則（座標はメートル。SUMO座標をそのまま渡す）:
+      1. 各点までの道のり cum を求める
+      2. 交差点はルート順に，前の交差点の道のり - BACK_M 以降で線に最も近い所に当てはめる（locate）
+      3. 自分の位置は，前回の道のり s から [s - BACK_M, s + AHEAD_M] の範囲で線に最も近い所に当てはめる。
+         線から OFF_ROUTE_M より離れていたら s - BACK_M 以降の全体で探し直し，それでも離れていればルート外（progress）
+      4. 交差点までの道のり = s_i - s（負なら 0）
+    """
+    BACK_M = 5.0
+    AHEAD_M = 300.0
+    OFF_ROUTE_M = 50.0
+
+    def __init__(self, pts):
+        self.xs = [p[0] for p in pts]
+        self.ys = [p[1] for p in pts]
+        self.cum = [0.0]
+        for i in range(1, len(pts)):
+            self.cum.append(self.cum[-1] + math.hypot(self.xs[i] - self.xs[i - 1], self.ys[i] - self.ys[i - 1]))
+
+    def project(self, px, py, s_min, s_max):
+        """道のりが [s_min, s_max] の当てはめ先のうち線に最も近いもの (s, d)。無ければ None（同じ距離なら s の小さい方）."""
+        import bisect
+        xs, ys, cum = self.xs, self.ys, self.cum
+        i = max(bisect.bisect_left(cum, s_min) - 1, 0)
+        best = None
+        while i < len(xs) - 1:
+            if cum[i] > s_max:
+                break
+            if cum[i + 1] >= s_min:
+                dx, dy = xs[i + 1] - xs[i], ys[i + 1] - ys[i]
+                l2 = dx * dx + dy * dy
+                if l2 > 0:
+                    u = max(0.0, min(1.0, ((px - xs[i]) * dx + (py - ys[i]) * dy) / l2))
+                    s = cum[i] + u * math.sqrt(l2)
+                    if s_min <= s <= s_max:
+                        d = math.hypot(px - (xs[i] + u * dx), py - (ys[i] + u * dy))
+                        if best is None or d < best[1] or (d == best[1] and s < best[0]):
+                            best = (s, d)
+            i += 1
+        return best
+
+    def progress(self, px, py, s_last):
+        """自分の道のり (s, ルート上か)。ルート外なら (s_last, False)."""
+        p = self.project(px, py, s_last - self.BACK_M, s_last + self.AHEAD_M)
+        if p is None or p[1] > self.OFF_ROUTE_M:
+            q = self.project(px, py, s_last - self.BACK_M, float("inf"))
+            if q is not None and (p is None or q[1] < p[1]):
+                p = q
+        if p is None or p[1] > self.OFF_ROUTE_M:
+            return s_last, False
+        return p[0], True
+
+    def locate(self, px, py, s_min):
+        """交差点の道のり（前の交差点の道のり s_min 以降）。当てはめ先が無ければ None."""
+        p = self.project(px, py, s_min - self.BACK_M, float("inf"))
+        return None if p is None else p[0]
+
+    def locate_all(self, pts):
+        """ルート順の点（交差点）の道のりのリスト（当てはめられなければ None）."""
+        out, prev = [], 0.0
+        for x, y in pts:
+            s = self.locate(x, y, prev)
+            out.append(s)
+            if s is not None:
+                prev = s
+        return out
+
+
+def lonlat_track(shape):
+    """[[緯度, 経度], ...] を，アプリと同じ近似（先頭を原点とする正距円筒）でメートル座標の RouteTrack にする.
+
+    戻り値: (RouteTrack, 緯度経度 -> (x, y) の関数)。点が2つ未満なら (None, None)
+    """
+    if not shape or len(shape) < 2:
+        return None, None
+    lat0, lon0 = shape[0][0], shape[0][1]
+    kx, ky = 111320.0 * math.cos(math.radians(lat0)), 110540.0
+
+    def to_xy(lat, lon):
+        return (lon - lon0) * kx, (lat - lat0) * ky
+
+    return RouteTrack([to_xy(la, lo) for la, lo in shape]), to_xy
+
+
 def sumo_home():
     """SUMO_HOME を返す（pipの eclipse-sumo でも公式インストーラでも可）."""
     if os.environ.get("SUMO_HOME"):

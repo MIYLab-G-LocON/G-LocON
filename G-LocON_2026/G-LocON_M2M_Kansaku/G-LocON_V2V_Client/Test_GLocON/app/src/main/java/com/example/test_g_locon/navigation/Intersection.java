@@ -20,6 +20,7 @@ public class Intersection {
     private double etaSec;      // 到達予測時間（秒）
     private double distanceM;   // 現在地からの距離（メートル）
     private double prevDistanceM = -1; // 前回の距離（LEAVE判定用）
+    private double routeDistanceM = Double.NaN; // ルートの線に沿った交差点までの道のり（ETA 用。無ければ NaN）
 
     private boolean joined = false;          // 現在JOIN中か
     private boolean hasJoinedAndLeft = false; // 一度JOIN→LEAVEした交差点は再JOINしない
@@ -61,6 +62,10 @@ public class Intersection {
         this.prevDistanceM = this.distanceM;
         this.distanceM = distanceM;
     }
+
+    /** ルートの線に沿った交差点までの道のり [m]（ルートの線が無い・ルート外なら NaN） */
+    public double getRouteDistanceM()      { return routeDistanceM; }
+    public void setRouteDistanceM(double m) { this.routeDistanceM = m; }
 
     public boolean isJoined()              { return joined; }
     public void setJoined(boolean joined)  { this.joined = joined; }

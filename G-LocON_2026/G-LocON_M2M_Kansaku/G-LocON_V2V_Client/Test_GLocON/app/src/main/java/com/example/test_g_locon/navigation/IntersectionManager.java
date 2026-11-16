@@ -17,6 +17,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
  *
  * パラメータ:
  *   参加タイミング τ  = 15.0  : ETA がこの値を下回ったらJOIN
+ *                                ETA = 交差点までの道のり ÷ max(速度, 1 m/s)。道のりはルートの線に沿った長さ
+ *                                （RouteGeometry.Track。2026/11/16 に直線距離から変更。ルートの線が無い・ルート外のときは直線距離）
  *                                （評価では 15 / 30 / 45秒を比較する。SUMOモードでは SimBridge から値を受け取る）
  *   参加円の半径 ρ    = 100.0 : 交差点までの直線距離がこの値未満なら，ETA に関係なくJOIN（0 = 参加円なし）
  *                                （評価では 0 / 50 / 100 / 150m を比較する。SUMOモードでは SimBridge から値を受け取る）
@@ -74,6 +76,13 @@ public class IntersectionManager {
 
     private final List<Intersection> intersections = new CopyOnWriteArrayList<>();
     private final HubenyDistance hubeny = new HubenyDistance();
+
+    /** ルートの線（ETA の道のり用）。無ければ直線距離で ETA を計算する */
+    private volatile RouteGeometry.Track track = null;
+    /** 交差点ID -> ルートの線の上の道のり [m] */
+    private final java.util.Map<String, Double> routeS = new java.util.concurrent.ConcurrentHashMap<>();
+    /** ルートの線の上の自分の道のり [m]（前回の値。後戻りを防ぐため） */
+    private double sMe = 0;
     private IIntersectionCallback callback;
 
     // join_log.csv
@@ -81,7 +90,7 @@ public class IntersectionManager {
 
     public IntersectionManager(Context context) {
         joinLog = new OutputToCSV(context, "join_log.csv");
-        joinLog.OutputFieledName("intersectionId", "t_update_ms", "eta_sec", "distance_m", "event");
+        joinLog.OutputFieledName("intersectionId", "t_update_ms", "eta_sec", "distance_m", "event", "route_m");
     }
 
     public void setCallback(IIntersectionCallback callback) {
@@ -92,6 +101,32 @@ public class IntersectionManager {
     public void setIntersections(List<Intersection> list) {
         intersections.clear();
         intersections.addAll(list);
+        locateIntersections();
+    }
+
+    /**
+     * ルートの線（[緯度, 経度] の列）をセットする。ETA の道のりに使う。null なら直線距離で計算する。
+     * 交差点リスト（setIntersections）と同じルートのものを渡すこと。
+     */
+    public void setRouteShape(List<double[]> shape) {
+        track = RouteGeometry.track(shape);
+        sMe = 0;
+        locateIntersections();
+    }
+
+    /** 各交差点をルート順にルートの線へ当てはめ，道のりを求める */
+    private void locateIntersections() {
+        routeS.clear();
+        RouteGeometry.Track t = track;
+        if (t == null) return;
+        double prev = 0;
+        for (Intersection i : intersections) {
+            double s = t.locate(i.getLat(), i.getLng(), prev);
+            if (!Double.isNaN(s)) {
+                routeS.put(i.getIntersectionId(), s);
+                prev = s;
+            }
+        }
     }
 
     public List<Intersection> getIntersections() {
@@ -111,6 +146,15 @@ public class IntersectionManager {
 
         // 通過判定（リストはルート順）: まだ通過していない最初の交差点から PASS_LOOKAHEAD 個先までを見て，
         // PASS_RADIUS_M 以内に入った最も先の交差点までを通過済みとする
+        // ルートの線の上の自分の道のり（ルート外なら道のりは使わない）
+        RouteGeometry.Track t = track;
+        boolean onRoute = false;
+        if (t != null) {
+            double[] p = t.progress(myLat, myLng, sMe);
+            onRoute = p[2] > 0;
+            if (onRoute) sMe = p[0];
+        }
+
         int n = intersections.size();
         int next = 0;
         while (next < n && intersections.get(next).isPassed()) next++;
@@ -130,7 +174,11 @@ public class IntersectionManager {
             Intersection intersection = intersections.get(k);
             double dist = intersection.getDistanceM();
 
-            double eta = dist / speed;
+            // ETA の距離: ルートの線に沿った道のり（無ければ直線距離）
+            Double si = onRoute ? routeS.get(intersection.getIntersectionId()) : null;
+            double routeM = si != null ? Math.max(si - sMe, 0) : Double.NaN;
+            intersection.setRouteDistanceM(routeM);
+            double eta = (Double.isNaN(routeM) ? dist : routeM) / speed;
             intersection.setEtaSec(eta);
 
             // 保険: ルート上の後の交差点を通過したのに，この交差点は近づかないまま（GPSのずれなど）
@@ -174,7 +222,8 @@ public class IntersectionManager {
                 String.valueOf(now),
                 String.format("%.1f", i.getEtaSec()),
                 String.format("%.1f", i.getDistanceM()),
-                event
+                event,
+                Double.isNaN(i.getRouteDistanceM()) ? "" : String.format("%.1f", i.getRouteDistanceM())
         );
     }
 
@@ -185,6 +234,7 @@ public class IntersectionManager {
             i.setHasJoinedAndLeft(false);
             i.resetDistanceHistory();
         }
+        sMe = 0;
         android.util.Log.i("IntersectionManager", "全交差点のJOIN状態をリセット: " + intersections.size() + "件");
     }
 

@@ -108,6 +108,20 @@ matplotlib があれば図も描く。無ければ `python eval_cdf.py --from-hi
 
 CDF は，値ごとの件数（度数分布）を小さい値から足し上げて全件数で割ったもの。接続時間・接続数は整数なので誤差なく作れる。
 
+### 3.5 ETA を道のりにした再評価（2026/11/16〜）
+
+2026/11/16 に，アプリの ETA の距離を直線距離から**ルートに沿った道のり**に変えた（README の「ETA」の項，EXPERIMENTS.md E17）。
+`compare_schemes.py` と `eval_run.py` の既定も道のり（`--eta-by path`）になった。それまでの結果（E14〜E16）は直線距離（`--eta-by line`）で，
+`eval_1`〜`eval_5` のバッチは直線距離のまま（再現用）にしてある。
+
+| バッチ | 内容 | 結果の場所 |
+|---|---|---|
+| `eval_6_main_path.bat` | 主の比較 60実行（生データつき）＋集計＋CDF の度数分布。数時間 | `results\eval_detail_path\main\`（report，report_cdf，raw） |
+| `eval_7_cdf_figs_path.bat` | 上の生データから論文・報告用の CDF の図と数値 | `results\eval_detail_path\main\report_cdf\figs\` |
+| `eval_8_params_path.bat` | τ・ρ・δ を1つずつ変える 5実行 | `results\eval_path\params\report\` |
+
+直線距離の結果のフォルダ（`results\eval\`，`results\eval_detail\`）とは別のフォルダに置くので，前の結果は消えない。
+
 ## 4. 結果の見方
 
 `results\eval\<計画>\` に1実行ごとの csv（1行 = 1方式），`report\` に集計ができる。

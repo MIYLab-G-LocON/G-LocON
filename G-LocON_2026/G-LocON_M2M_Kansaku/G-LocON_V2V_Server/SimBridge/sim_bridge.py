@@ -27,7 +27,7 @@
 
 ■ 仮想クライアント（--virtual）
     SUMOの車1台ごとに専用のUDPソケットを持ち，アプリと同じ手順・同じ形式で
-      INTERSECTION_QUERY（MasterServer）→ ETA<τ（既定15秒）でJOIN／通過後δ（既定60m）離れて遠ざかったらLEAVE／15秒ごとKEEPALIVE
+      INTERSECTION_QUERY（MasterServer）→ ETA（ルートに沿った道のり÷速度）<τ（既定15秒）でJOIN／通過後δ（既定60m）離れて遠ざかったらLEAVE／15秒ごとKEEPALIVE
     を送る。エッジサーバから届くメンバー一覧・追加・離脱通知でグループを管理し，
     グループ内の実機へ位置（SendLocation）を1秒ごとに送る（実機の地図に仮想車両として表示される）。
     peerID は "sim-<車両ID>"。
@@ -135,15 +135,46 @@ def hazard_ahead(path, cum, me_xy, s_last, hx, hy, h_bearing):
     return None, s_me
 
 
-def route_step(seq, lat, lon, speed):
+class RouteProgress:
+    """ETA の道のり用の状態（アプリの IntersectionManager の track・routeS・sMe と同じ）.
+
+    実機に送るのと同じルートの線（route_shape の [緯度, 経度]）と交差点の緯度経度から，アプリと同じ近似で計算する。
+    """
+
+    def __init__(self, shape, seq):
+        self.track, self.to_xy = common.lonlat_track(shape)
+        self.s_me = 0.0
+        self.s = {}
+        if self.track:
+            for it, si in zip(seq, self.track.locate_all([self.to_xy(it.lat, it.lon) for it in seq])):
+                if si is not None:
+                    self.s[it.iid] = si
+
+    def update(self, lat, lon):
+        """自分の道のりを更新する。ルート上なら True（ルートの線が無い・ルート外なら False）."""
+        if not self.track:
+            return False
+        s, ok = self.track.progress(*self.to_xy(lat, lon), self.s_me)
+        if ok:
+            self.s_me = s
+        return ok
+
+    def route_dist(self, it):
+        si = self.s.get(it.iid)
+        return None if si is None else max(si - self.s_me, 0.0)
+
+
+def route_step(seq, lat, lon, speed, rp=None):
     """アプリの IntersectionManager.update と同じ判定を1回行う（距離・通過済みを更新し，すべきことを返す）.
 
+    ETA の距離は，rp（RouteProgress）があればルートの線に沿った道のり，無い・ルート外なら直線距離（アプリと同じ）。
     seq はルート順の Intersection。返り値（順に処理する）:
       ("passed_next", it) 後の交差点を通過したのに近づかないままだった → 通過したものとみなす
       ("join", it, eta)   参加する（ETA < τ または ρ 以内）
       ("leave", it)       離脱する（通過済み・δ以上・遠ざかっている）
     仮想クライアント（送信する）と，実機の車の色分け用の追跡（送信しない）で共通に使う。
     """
+    on_route = rp.update(lat, lon) if rp else False
     nxt = 0
     while nxt < len(seq) and seq[nxt].passed:
         nxt += 1
@@ -154,7 +185,8 @@ def route_step(seq, lat, lon, speed):
             it.passed = True
             last_passed = max(last_passed, k)
     for k, it in enumerate(seq):
-        eta = it.dist / speed
+        rd = rp.route_dist(it) if on_route else None
+        eta = (it.dist if rd is None else rd) / speed
         if k < last_passed and not it.passed:
             it.passed = True
             yield ("passed_next", it)
@@ -209,6 +241,7 @@ class PhoneTracker(GroupColor):
         self.ix = {iid: Intersection(iid, la, lo) for iid, la, lo in br.route_intersections(vid)}
         for it in self.ix.values():
             it.es = it.iid in br.es_index     # エッジサーバのある交差点だけ JOIN する（アプリと同じ）
+        self.rp = RouteProgress(br.route_shape(vid), list(self.ix.values()))
         self.next_tick = br.now()
 
     def tick(self):
@@ -219,7 +252,7 @@ class PhoneTracker(GroupColor):
         x, y = common.vehicle_xy(br.t, self.vid)
         lon, lat = br.net.convertXY2LonLat(x, y)
         speed = max(br.t.vehicle.getSpeed(self.vid), MIN_SPEED)
-        for act in route_step(list(self.ix.values()), lat, lon, speed):
+        for act in route_step(list(self.ix.values()), lat, lon, speed, self.rp):
             it = act[1]
             if act[0] == "join":
                 it.joined = True
@@ -841,6 +874,7 @@ class VirtualClient(GroupColor):
     def __init__(self, br, vid, seq):
         self.br, self.vid, self.peer = br, vid, f"sim-{vid}"
         self.ix = {iid: Intersection(iid, la, lo) for iid, la, lo in seq}
+        self.rp = RouteProgress(br.route_shape(vid), list(self.ix.values()))   # ETA の道のり（実機と同じ計算）
         self.members = {}                  # iid -> set(peerID)
         self.addrs = {}                    # peerID -> (ip, port)  位置の送信先
         self.join_t = {}
@@ -900,7 +934,7 @@ class VirtualClient(GroupColor):
         lat, lon = self.user()
         speed = max(br.t.vehicle.getSpeed(self.vid), MIN_SPEED)
         # ルート順（アプリの IntersectionManager.update と同じ判定）
-        for act in route_step(list(self.ix.values()), lat, lon, speed):
+        for act in route_step(list(self.ix.values()), lat, lon, speed, self.rp):
             it = act[1]
             if act[0] == "passed_next":
                 # 保険: 後の交差点を通過したのに近づかないままだった → 通過したものとみなす

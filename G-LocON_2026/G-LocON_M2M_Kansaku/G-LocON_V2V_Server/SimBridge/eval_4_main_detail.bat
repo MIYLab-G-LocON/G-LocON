@@ -1,9 +1,10 @@
 @echo off
 rem Formal evaluation with raw data: same 60 runs as eval_2_main.bat, plus per-second positions, connection records, etc.
+rem ETA by straight-line distance (the app before 2026-11-16; E14-E16). For the current app use eval_6/eval_8.
 rem Results go to results\eval_detail (not results\eval), so the earlier results are kept. About 1 GB. Safe to stop and re-run.
 cd /d "%~dp0"
 title eval_4_main_detail.bat
-python eval_run.py --plan main --jobs 4 --detail --root results\eval_detail %*
+python eval_run.py --plan main --jobs 4 --detail --root results\eval_detail --eta-by line %*
 python eval_report.py --plan main --root results\eval_detail
 python eval_cdf.py --plan main --root results\eval_detail
 echo.

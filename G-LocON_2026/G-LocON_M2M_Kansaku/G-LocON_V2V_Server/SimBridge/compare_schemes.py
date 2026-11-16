@@ -186,13 +186,98 @@ class Scheme:
         self.tp += len(cur & relevant)
 
 
+class PathTracks:
+    """ETA の道のり（--eta-by path）: アプリ・sim_bridge.py と同じ規則で，測位誤差つきの位置をルートの線に当てはめる.
+
+    ルートの線は sim_bridge.py の route_xy と同じく，道路の形と交差点の中の曲線（SUMO座標）をつないだもの。
+    交差点の道のりは，ルート順に交差点の中心を線に当てはめて求める（common.RouteTrack）。
+    """
+
+    def __init__(self, traci, net, junction_xy, routes):
+        self.t, self.net, self.j, self.routes = traci, net, junction_xy, routes
+        self.cache = {}          # 車 -> (RouteTrack, {交差点: 道のり})
+        self.s_me = {}           # 車 -> 前回の道のり
+        self.at = {}             # 車 -> (時刻, ルート上か)
+        self.via_cache = {}
+
+    def junction_path(self, e1, e2):
+        """sim_bridge.py の junction_path と同じ（交差点の中を通る線）."""
+        key = (e1, e2)
+        if key not in self.via_cache:
+            pts = []
+            try:
+                for k in range(self.t.edge.getLaneNumber(e1)):
+                    link = next((ln for ln in self.t.lane.getLinks(f"{e1}_{k}")
+                                 if ln[0].rsplit("_", 1)[0] == e2), None)
+                    if link is None:
+                        continue
+                    via, guard = link[4], 0
+                    while via and guard < 5:
+                        pts += list(self.t.lane.getShape(via))
+                        nxt = self.t.lane.getLinks(via)
+                        via = nxt[0][4] if nxt else ""
+                        guard += 1
+                    break
+            except Exception:
+                pts = []
+            self.via_cache[key] = pts
+        return self.via_cache[key]
+
+    def _build(self, v):
+        route = self.t.vehicle.getRoute(v)
+        pts = []
+        for k, e in enumerate(route):
+            seg = list(self.net.getEdge(e).getShape())
+            if k + 1 < len(route):
+                seg += self.junction_path(e, route[k + 1])
+            for p in seg:
+                if not pts or pts[-1] != p:
+                    pts.append(p)
+        tr = common.RouteTrack(pts) if len(pts) >= 2 else None
+        si = {}
+        if tr:
+            iids = list(self.routes.targets(v).keys())          # ルート順
+            for iid, s in zip(iids, tr.locate_all([self.j[i] for i in iids])):
+                if s is not None:
+                    si[iid] = s
+        self.cache[v] = (tr, si)
+        return self.cache[v]
+
+    def step(self, v, now, x, y):
+        """その時刻の自分の道のりを更新する（同じ時刻は1回だけ）。ルート上なら True."""
+        a = self.at.get(v)
+        if a is not None and a[0] == now:
+            return a[1]
+        tr, _ = self.cache.get(v) or self._build(v)
+        ok = False
+        if tr:
+            s, ok = tr.progress(x, y, self.s_me.get(v, 0.0))
+            if ok:
+                self.s_me[v] = s
+        self.at[v] = (now, ok)
+        return ok
+
+    def distance(self, v, iid):
+        """直前の step のあとの，交差点までの道のり。無ければ None."""
+        a = self.at.get(v)
+        if not a or not a[1]:
+            return None
+        si = self.cache[v][1].get(iid)
+        return None if si is None else max(si - self.s_me.get(v, 0.0), 0.0)
+
+
 class EtaScheme(Scheme):
     """本システム: エッジサーバ交差点への ETA < τ で参加，通過して δ 離れ遠ざかったら離脱."""
 
-    def __init__(self, tau, delta, junction_xy, routes, join_dist=0.0, eta_by="line"):
+    def __init__(self, tau, delta, junction_xy, routes, join_dist=0.0, eta_by="path", paths=None):
         super().__init__(f"eta_t{int(tau)}_j{int(join_dist)}_d{int(delta)}")
         self.tau, self.delta, self.j, self.routes = tau, delta, junction_xy, routes
-        self.eta_by = eta_by            # ETA の距離: "line" = 直線距離（アプリ・sim_bridge.py と同じ），"route" = 道のり（E13 まで）
+        # ETA の距離:
+        #   "path"  = ルートの線に沿った道のり（測位誤差つきの位置を線に当てはめる。アプリ・sim_bridge.py と同じ。2026/11/16〜 既定）
+        #   "line"  = 直線距離（2026/11/16 までのアプリと同じ。E14〜E16 の計算）
+        #   "route" = SUMO の正しい道のり＋誤差（E13 までの計算）
+        self.eta_by = eta_by
+        self.paths = paths
         self.join_dist = join_dist      # 参加円の半径 ρ: 交差点までの直線距離がこれ未満なら，ETA に関係なく参加する（0 = なし）
         self.members = {iid: set() for iid in junction_xy}
         self.prev = {}
@@ -207,6 +292,9 @@ class EtaScheme(Scheme):
                 self.asked.add(v)
                 self.ctrl += 2
                 self.ev(now, v, "query", 2)
+        if self.eta_by == "path":
+            for v in order:                   # アプリと同じく，毎秒すべての車の道のりを更新する
+                self.paths.step(v, now, *xy[v])
         for iid, (jx, jy) in self.j.items():
             mem = self.members[iid]
             for v in sorted(m for m in mem if m not in alive):
@@ -233,7 +321,11 @@ class EtaScheme(Scheme):
                     continue
                 if d is None:
                     continue
-                if self.eta_by == "line":
+                if self.eta_by == "path":
+                    # ルートの線に沿った道のり（ルート外なら直線距離。アプリと同じ）
+                    rd = self.paths.distance(v, iid)
+                    d = eu if rd is None else rd
+                elif self.eta_by == "line":
                     d = eu                     # 直線距離（測位誤差は eu に入っている）
                 else:
                     d = max(d + self.dnoise.get(v, 0.0), 0.0)
@@ -559,8 +651,9 @@ def main():
     ap.add_argument("--search-period", type=float, default=2.0,
                     help="従来G-LocONの問い合わせ間隔 [秒]。元のアプリ（G-LocON_2024）は位置の更新2回ごと（約2秒）")
     ap.add_argument("--no-hazards", action="store_true", help="急停止を起こさない")
-    ap.add_argument("--eta-by", choices=["line", "route"], default="line",
-                    help="本システムの ETA に使う距離。line = 直線距離（アプリと同じ。既定），route = 道のり（E13 までの計算）")
+    ap.add_argument("--eta-by", choices=["path", "line", "route"], default="path",
+                    help="本システムの ETA に使う距離。path = ルートの線に沿った道のり（アプリと同じ。既定。2026/11/16〜），"
+                         "line = 直線距離（E14〜E16 の計算），route = SUMO の正しい道のり＋誤差（E13 までの計算）")
     ap.add_argument("--gui", action="store_true", help="sumo-gui で走行を表示する（説明・確認用。遅くなる）")
     ap.add_argument("--gps-noise", type=float, default=0.0,
                     help="測位誤差の標準偏差 [m]（東西・南北それぞれ）。接続の判断だけがこの誤差つきの位置を使い，評価は正しい位置で行う")
@@ -605,16 +698,17 @@ def main():
     es_nodes = set(jids.values())
     junction_xy = {iid: traci.junction.getPosition(j) for iid, j in jids.items()}
     routes = RouteIndex(traci, net, jids)
+    paths = PathTracks(traci, net, junction_xy, routes) if a.eta_by == "path" else None
     to_node = routes.to_node
     with open(common.INTERSECTIONS_CSV, encoding="utf-8") as f:
         all_nodes = {r["junctionId"] for r in csv.DictReader(f)}
 
     if a.etas:
         # τ:ρ:δ の組をそのまま指定（1つずつ変える比較用）
-        schemes = [EtaScheme(float(t), float(d), junction_xy, routes, float(j), a.eta_by)
+        schemes = [EtaScheme(float(t), float(d), junction_xy, routes, float(j), a.eta_by, paths)
                    for t, j, d in (x.split(":") for x in a.etas.split(","))]
     else:
-        schemes = [EtaScheme(float(tau), float(dl), junction_xy, routes, float(jd), a.eta_by)
+        schemes = [EtaScheme(float(tau), float(dl), junction_xy, routes, float(jd), a.eta_by, paths)
                    for tau in a.taus.split(",") for dl in a.deltas.split(",") for jd in a.join_dists.split(",")]
     schemes += [DistScheme(float(r), a.search_period) for r in a.radii.split(",")]
 

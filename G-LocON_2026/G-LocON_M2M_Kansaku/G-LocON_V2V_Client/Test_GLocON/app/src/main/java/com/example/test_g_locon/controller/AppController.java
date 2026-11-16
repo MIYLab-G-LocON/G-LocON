@@ -524,7 +524,9 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
      * 実機モード（OSRM）とSUMOモード（SimBridge）で共通の処理。routeExecutor 上で呼ぶこと。
      */
     private void loadRoute(List<Intersection> intersections) {
-        // ② IntersectionManagerに交差点リストをセット（ETA/LEAVE判定開始）
+        // ② IntersectionManagerにルートの線と交差点リストをセット（ETA/LEAVE判定開始）
+        //    ルートの線は ETA の道のり（交差点までのルートに沿った長さ）に使う
+        intersectionManager.setRouteShape(routeShape);
         intersectionManager.setIntersections(intersections);
 
         // ③ UIへルート表示を通知
@@ -707,6 +709,7 @@ public class AppController implements ISTUNServerClient, IP2P, LocationListener 
             leaveAllIntersections();
             routeS = 0;
             routeShape = null;
+            intersectionManager.setRouteShape(null);
             intersectionManager.setIntersections(new ArrayList<>());
             callback.onRouteLoaded(new ArrayList<>(), null);
         });

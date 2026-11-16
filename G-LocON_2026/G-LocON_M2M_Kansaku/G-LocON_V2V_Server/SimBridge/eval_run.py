@@ -8,6 +8,12 @@
     python eval_run.py --plan main --jobs 4    # 同時に4つ実行（PCのコア数に合わせる）
     python eval_run.py --plan main --detail --root results/eval_detail
                                                # 生データ（1秒ごとの全車の位置・接続の記録など）も残す（60実行で約1GB）
+    python eval_run.py --plan main --eta-by line
+                                               # ETA を直線距離で計算する（2026/11/16 より前のアプリ。E14〜E16 の再現）
+
+本システムの ETA の距離は，既定でルートの線に沿った道のり（--eta-by path。2026/11/16 からのアプリと同じ）。
+直線距離（--eta-by line）の結果と混ざらないよう，--root を指定しないときの置き場所を分ける:
+  path → results/eval_path/<plan>/，line → results/eval/<plan>/（それまでの置き場所）
 
 1実行 = compare_schemes.py を1回（SUMO を1回走らせ，その走行の上で全方式の接続を計算する）。
 結果は results/eval/<plan>/<条件名>.csv に1実行ずつ保存する。途中で止めても，もう一度実行すれば
@@ -91,15 +97,15 @@ def ensure_net(scenario):
     subprocess.run([sys.executable, "build_net.py"], cwd=HERE, env=env, check=True)
 
 
-def run_one(r, plan, gui, detail=False):
+def run_one(r, plan, gui, detail=False, eta_by="path"):
     out_csv = os.path.join(RESULT_ROOT, plan, r["name"] + ".csv")
-    tag = f"eval_{plan}_{r['name']}"
+    tag = f"eval_{plan}_{r['name']}" + ("" if eta_by == "line" else f"_{eta_by}")   # 作業フォルダが line と重ならないように
     sigma, corr = NOISE[r["noise"]]
     cmd = [sys.executable, "compare_schemes.py", "--tag", tag,
            "--etas", r["etas"], "--radii", r["radii"],
            "--period", str(r["period"]), "--min-distance", str(MAPS[r["map"]][2]), "--fringe-factor", str(MAPS[r["map"]][3]),
            "--seed", str(r["seed"]), "--trip-seed", str(r["seed"]),
-           "--gps-noise", str(sigma), "--gps-corr", str(corr)]
+           "--gps-noise", str(sigma), "--gps-corr", str(corr), "--eta-by", eta_by]
     if gui:
         cmd.append("--gui")
     if detail:
@@ -148,11 +154,16 @@ def main():
     ap.add_argument("--only", default="", help="条件名にこの文字列を含むものだけ実行する（例: campus_mid）")
     ap.add_argument("--detail", action="store_true",
                     help="生データ（1秒ごとの全車の位置・接続の記録など）も <root>/<plan>/raw/ に残す")
-    ap.add_argument("--root", default="", help="結果を置くフォルダ（既定 results/eval）。前の結果を残したまま別に走らせるとき")
+    ap.add_argument("--root", default="", help="結果を置くフォルダ（既定 results/eval_path，--eta-by line なら results/eval）")
+    ap.add_argument("--eta-by", choices=["path", "line"], default="path",
+                    help="本システムの ETA の距離。path = ルートに沿った道のり（既定。今のアプリ），line = 直線距離（E14〜E16）")
     a = ap.parse_args()
     global RESULT_ROOT
     if a.root:
         RESULT_ROOT = os.path.abspath(a.root)
+    elif a.eta_by == "path":
+        RESULT_ROOT = os.path.join(HERE, "results", "eval_path")
+    print(f"ETA の距離: {'ルートに沿った道のり' if a.eta_by == 'path' else '直線距離'}（--eta-by {a.eta_by}），結果: {RESULT_ROOT}")
 
     runs = [r for r in plan_runs(a.plan) if a.only in r["name"]]
     os.makedirs(os.path.join(RESULT_ROOT, a.plan, "logs"), exist_ok=True)
@@ -172,7 +183,7 @@ def main():
     jobs = 1 if a.gui else max(1, a.jobs)
     t0, n_ok = time.time(), 0
     with ThreadPoolExecutor(max_workers=jobs) as ex:
-        futs = [ex.submit(run_one, r, a.plan, a.gui, a.detail) for r in todo]
+        futs = [ex.submit(run_one, r, a.plan, a.gui, a.detail, a.eta_by) for r in todo]
         for i, fu in enumerate(as_completed(futs), 1):
             name, ok, sec, log = fu.result()
             n_ok += ok

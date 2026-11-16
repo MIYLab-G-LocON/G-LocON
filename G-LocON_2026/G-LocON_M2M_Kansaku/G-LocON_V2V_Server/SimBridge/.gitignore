@@ -3,3 +3,5 @@ __pycache__/
 scenario/*.trips.xml
 results/eval/
 results/eval_detail/
+results/eval_path/
+results/eval_detail_path/

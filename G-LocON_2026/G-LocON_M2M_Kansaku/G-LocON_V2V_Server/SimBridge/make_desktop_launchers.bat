@@ -16,6 +16,12 @@ for /f "usebackq delims=" %%D in (`powershell -NoProfile -Command "[Environment]
 >> "%DESK%\GLocON_2_sumo_pc_only.bat" echo call "%~dp0run_bridge_pc_only.bat"
 > "%DESK%\GLocON_3_eval_5_cdf_figs.bat" echo @echo off
 >> "%DESK%\GLocON_3_eval_5_cdf_figs.bat" echo call "%~dp0eval_5_cdf_figs.bat"
+> "%DESK%\GLocON_3_eval_6_main_path.bat" echo @echo off
+>> "%DESK%\GLocON_3_eval_6_main_path.bat" echo call "%~dp0eval_6_main_path.bat"
+> "%DESK%\GLocON_3_eval_7_cdf_figs_path.bat" echo @echo off
+>> "%DESK%\GLocON_3_eval_7_cdf_figs_path.bat" echo call "%~dp0eval_7_cdf_figs_path.bat"
+> "%DESK%\GLocON_3_eval_8_params_path.bat" echo @echo off
+>> "%DESK%\GLocON_3_eval_8_params_path.bat" echo call "%~dp0eval_8_params_path.bat"
 echo Created launchers on %DESK%:
 dir /b "%DESK%\GLocON_*.bat"
 pause
