@@ -129,6 +129,10 @@ CDF は，値ごとの件数（度数分布）を小さい値から足し上げ�
 
 直線距離の結果のフォルダ（`results\eval\`，`results\eval_detail\`）とは別のフォルダに置くので，前の結果は消えない。
 
+`eval_9` までの結果（90実行）は `results\20261118_eval_main_path10\`（全実行の値，集計，CDF の度数分布と数値）に置いた。
+結果まとめ（`results\eval_summary.html`，1つの HTML にグラフ・全条件の表・説明を入れたもの）はこの結果で作り直した:
+`python make_summary_html.py --runs results\20261118_eval_main_path10\all_runs.csv --hist results\20261118_eval_main_path10\cdf_hist.csv`
+
 ## 4. 結果の見方
 
 `results\eval\<計画>\` に1実行ごとの csv（1行 = 1方式），`report\` に集計ができる。
