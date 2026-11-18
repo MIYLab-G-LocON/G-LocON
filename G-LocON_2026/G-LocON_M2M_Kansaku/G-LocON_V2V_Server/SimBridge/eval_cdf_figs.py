@@ -29,6 +29,7 @@ CDF（累積分布）: 横軸の値「以下」になった割合を縦軸に描
     rep_cdf_dur_all.pdf       報告用：接続の継続時間（全 6 条件，測位誤差 5 m）
     rep_cdf_peers_all.pdf     報告用：同時接続数（全 6 条件，測位誤差 5 m）
     rep_cdf_gps.pdf           報告用：測位誤差の有無の比較（交通量多の 2 条件）
+    rep_bars_other.pdf        報告用：同時接続数・再接続・進路が交わらない相手・10 s 以下で切れた接続の棒グラフ（全 6 条件）
     cdf_numbers.csv           論文・報告に書いた数値（中央値，10 s 以下・60 s 以上の割合，0 台の時間，90 パーセンタイル）
 
 必要なもの: matplotlib（pip install matplotlib）。numpy・pandas は不要。
@@ -55,7 +56,7 @@ def make_lines(proposed):
 
 LINES = make_lines(PROPOSED)
 CONDS = [("campus_low", "大学周辺・交通量少"), ("campus_mid", "大学周辺・交通量中"), ("campus_high", "大学周辺・交通量多"),
-         ("arterial_low", "幹線道路・交通量少"), ("arterial_mid", "幹線道路・交通量中"), ("arterial_high", "幹線道路・交通量多")]
+         ("arterial_low", "幹線道路を含む・交通量少"), ("arterial_mid", "幹線道路を含む・交通量中"), ("arterial_high", "幹線道路を含む・交通量多")]
 XLABEL = {"conn_dur": "接続の継続時間 [s]", "peers": "同時接続数 [台]"}
 W = 3.35  # 論文の 1 段の幅 [inch]
 H2 = 3.0   # 論文の 2×2 の図の高さ [inch]（CDF と棒グラフで同じ大きさにする）
@@ -208,7 +209,7 @@ def style(ax, m, xlabel, fs_label, fs_tick, dur_max=None):
 
 def fig_paper(plt, hist, out):
     """論文の図: 代表 2 条件（測位誤差 5 m）の接続の継続時間（対数の軸）と同時接続数."""
-    conds = (("campus_mid_gps5slow", "大学周辺・交通量中"), ("arterial_high_gps5slow", "幹線道路・交通量多"))
+    conds = (("campus_mid_gps5slow", "大学周辺・交通量中"), ("arterial_high_gps5slow", "幹線道路を含む・交通量多"))
     fig, axes = plt.subplots(2, 2, figsize=(W, H2))
     for i, (c, title) in enumerate(conds):
         for j, m in enumerate(("conn_dur", "peers")):
@@ -229,7 +230,12 @@ def fig_paper(plt, hist, out):
 
 MAPS = (("campus", "大学周辺"), ("arterial", "幹線道路を含む"))
 TRAFFIC = (("low", "少"), ("mid", "中"), ("high", "多"))
-BARS = (("ctrl_per_veh_min", "制御メッセージ数\n[回/台・分]"), ("met_margin_es", "判断余裕時間の\n確保率 [%]"))
+BARS = (("ctrl_per_veh_min", "1台あたりの制御\nメッセージ数 [回/分]"), ("met_margin_es", "判断余裕時間の\n確保率 [%]"))
+
+
+# 報告用の棒グラフ（論文では表と本文で述べる指標）
+EXTRA_BARS = (("peers_mean", "同時接続数\n[台]"), ("reconn_A_per_veh_min", "1台あたりの\n再接続 [回/分]"),
+              ("noshare_pct", "進路が交わらない\n相手との接続 [%]"), ("short_pct", "10 s以下で切れた\n接続 [%]"))
 
 
 def read_runs(path):
@@ -237,7 +243,7 @@ def read_runs(path):
     res = {}
     with open(path, encoding="utf-8-sig") as f:
         for r in csv.DictReader(f):
-            for col, _ in BARS:
+            for col, _ in BARS + EXTRA_BARS:
                 if r.get(col, "") != "":
                     res.setdefault((r["map"], r["traffic"], r["noise"], r["scheme"], col), []).append(float(r[col]))
     return res
@@ -251,7 +257,7 @@ def mean_sd(v):
 
 def nice_top(v):
     """軸の上端（凡例を置く余白を含めて，切りのよい値）."""
-    for step in (10, 20, 25, 50, 100):
+    for step in (1, 2, 5, 10, 20, 25, 50, 100):
         if v / step <= 8:
             return step * int(-(-v // step)), step
     return 100 * int(-(-v // 100)), 100
@@ -260,10 +266,19 @@ def nice_top(v):
 def bar_top(runs, col, noise, room):
     """縦軸の上端と目盛り間隔. room: 凡例を置く余白の倍率."""
     if col == "met_margin_es":
-        return 140, 20      # 上の 100〜140 % は凡例を置く余白（目盛りもそこまで振る）
+        return 140, 20      # 上の 100〜140 % は凡例を置く余白（% なので目盛りは 100 まで。tick_cap）
     mx = max(m + sd for (mp, t, n, s, c), v in runs.items() if c == col and n == noise and s in LINES
              for m, sd in [mean_sd(v)])
     return nice_top(mx * room)
+
+
+def tick_cap(col):
+    """目盛りを振る上限。割合（%）は 100 を超える目盛りに意味がないので 100 まで（凡例の余白には振らない）."""
+    return 100 if col == "met_margin_es" else None
+
+
+def set_yticks(ax, top, step, cap=None):
+    ax.set_ylim(0, top); ax.set_yticks(range(0, min(top, cap or top) + 1, step))
 
 
 def bar_panel(ax, runs, col, mp, noise, top, step, xlabel):
@@ -281,7 +296,7 @@ def bar_panel(ax, runs, col, mp, noise, top, step, xlabel):
                error_kw=dict(lw=0.5, capsize=1.2, ecolor="k", capthick=0.5))
     ax.set_xlim(-0.55, 2.55)
     ax.set_xticks(range(3)); ax.set_xticklabels([t for _, t in TRAFFIC])
-    ax.set_ylim(0, top); ax.set_yticks(range(0, top + 1, step))   # 凡例のために伸ばした所にも目盛りを振る
+    set_yticks(ax, top, step, tick_cap(col))   # 凡例のために伸ばした所にも目盛りを振る（% は 100 まで）
     ax.set_xlabel(xlabel, fontsize=FS_LABEL, linespacing=1.25)
     frame(ax, FS_TICK, grid="y")
 
@@ -292,12 +307,12 @@ def bar_legend(ax, warn=True):
                        handlelength=0.9, handletextpad=0.3, columnspacing=0.5, borderpad=0.25)
 
 
-def bar_legends(axs, top, step):
+def bar_legends(axs, top, step, cap=None):
     """同じ指標のグラフすべてに凡例を入れる。どれかで棒にかぶるなら，縦軸の上端を 1 目盛りずつ伸ばして置き直す
     （伸ばした所にも目盛りを振る）."""
     for k in range(6):
         for ax in axs:
-            ax.set_ylim(0, top); ax.set_yticks(range(0, top + 1, step))
+            set_yticks(ax, top, step, cap)
             if ax.get_legend():
                 ax.get_legend().remove()
         if all([bar_legend(ax, warn=(k == 5)) for ax in axs]):
@@ -317,8 +332,24 @@ def fig_bars(plt, runs, out, noise="gps5slow"):
                 axes[i][j].set_ylabel(ylabel, fontsize=FS_LABEL, linespacing=1.15)
     fig.subplots_adjust(wspace=0.3, hspace=0.62)
     for i, (col, _) in enumerate(BARS):      # 凡例はすべてのグラフに入れる
-        bar_legends(axes[i], *bar_top(runs, col, noise, 1.55))
+        bar_legends(axes[i], *bar_top(runs, col, noise, 1.55), cap=tick_cap(col))
     fig.savefig(os.path.join(out, "fig_bars.pdf"), bbox_inches="tight", pad_inches=0.02)
+    plt.close(fig)
+
+
+def fig_bars_extra(plt, runs, out, noise="gps5slow"):
+    """報告用: 論文では表と本文で述べる 4 指標の棒グラフ（全 6 条件，平均と標準偏差）。1 段の幅で 4 行 × 2 列."""
+    fig, axes = plt.subplots(len(EXTRA_BARS), 2, figsize=(W, H2 / 2 * len(EXTRA_BARS)))
+    for i, (col, ylabel) in enumerate(EXTRA_BARS):
+        top, step = bar_top(runs, col, noise, 1.55)
+        for j, (mp, mtitle) in enumerate(MAPS):
+            bar_panel(axes[i][j], runs, col, mp, noise, top, step, f"交通量\n({'abcdefgh'[2 * i + j]}) {mtitle}")
+            if j == 0:
+                axes[i][j].set_ylabel(ylabel, fontsize=FS_LABEL, linespacing=1.15)
+    fig.subplots_adjust(wspace=0.3, hspace=0.62)
+    for i, (col, _) in enumerate(EXTRA_BARS):
+        bar_legends(axes[i], *bar_top(runs, col, noise, 1.55), cap=tick_cap(col))
+    fig.savefig(os.path.join(out, "rep_bars_other.pdf"), bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)
 
 
@@ -330,7 +361,7 @@ def fig_bar_one(plt, runs, out, col, ylabel, name, noise="gps5slow"):
         bar_panel(axes[j], runs, col, mp, noise, top, step, f"交通量\n({'ab'[j]}) {mtitle}")
     axes[0].set_ylabel(ylabel, fontsize=FS_LABEL, linespacing=1.15)
     fig.subplots_adjust(wspace=0.3)
-    bar_legends(axes, top, step)            # 凡例はすべてのグラフに入れる
+    bar_legends(axes, top, step, cap=tick_cap(col))   # 凡例はすべてのグラフに入れる
     fig.savefig(os.path.join(out, name), bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)
 
@@ -342,19 +373,20 @@ def fig_all(plt, hist, out, m, name):
         ax = axes[k // 3][k % 3]
         for s, (lab, col, ls, lw) in LINES.items():
             x, y = cdf(hist[(f"{c}_gps5slow", m, s)])
-            ax.step(x, y, where="post", color=col, ls=ls, lw=lw, label=lab)
+            ax.plot(*step_xy(x, y), color=col, ls=ls, lw=lw, label=lab)
         style(ax, m, f"{XLABEL[m]}\n({'abcdef'[k]}) {title}", 7.5, 7)
         if k % 3 == 0:
             ax.set_ylabel("累積確率", fontsize=7.5)
-    legend_in(axes[0][0 if m == "conn_dur" else 1], "lower right", 5.8, handlelength=1.6)   # 曲線と重ならない右下に置く
     fig.subplots_adjust(wspace=0.25, hspace=0.55)
+    for ax in axes.flat:      # 凡例はすべてのグラフに。線にかぶらない場所に置く
+        legend_free(ax, CDF_LOCS, 5.8, handlelength=1.2, handletextpad=0.3, borderpad=0.2, labelspacing=0.1)
     fig.savefig(os.path.join(out, name), bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)
 
 
 def fig_gps(plt, hist, out):
     """報告用: 測位誤差の有無による接続の継続時間の比較（交通量多の 2 条件）."""
-    conds = (("campus_high", "大学周辺・交通量多"), ("arterial_high", "幹線道路・交通量多"))
+    conds = (("campus_high", "大学周辺・交通量多"), ("arterial_high", "幹線道路を含む・交通量多"))
     sch = {PROPOSED: ("提案方式", LINES[PROPOSED][1], 1.2), "dist_r100": ("従来 100 m", LINES["dist_r100"][1], 0.9)}
     fig, axes = plt.subplots(1, 2, figsize=(6.3, 2.3))
     for k, (c, title) in enumerate(conds):
@@ -362,12 +394,13 @@ def fig_gps(plt, hist, out):
         for s, (lab, col, lw) in sch.items():
             for g, glab, ls in (("gps0", "誤差なし", "-"), ("gps5slow", "誤差5 m", (0, (4, 2)))):
                 x, y = cdf(hist[(f"{c}_{g}", "conn_dur", s)])
-                ax.step(x, y, where="post", color=col, ls=ls, lw=lw, label=f"{lab}（{glab}）")
-        style(ax, "conn_dur", f"{XLABEL['conn_dur']}\n({'ab'[k]}) {title}", 7.5, 7)
+                ax.plot(*step_xy(x, y), color=col, ls=ls, lw=lw, label=f"{lab}（{glab}）")
+        style(ax, "conn_dur", f"{XLABEL['conn_dur']}\n({'ab'[k]}) {title}", 7.5, 7, dur_max=5000)   # 右に凡例の余白
         if k == 0:
             ax.set_ylabel("累積確率", fontsize=7.5)
-    legend_in(axes[1], "lower right", 6.5)
     fig.subplots_adjust(wspace=0.22)
+    for ax in axes:           # 凡例はすべてのグラフに
+        legend_free(ax, CDF_LOCS, 6.2, handlelength=1.6, handletextpad=0.3, borderpad=0.25, labelspacing=0.15)
     fig.savefig(os.path.join(out, "rep_cdf_gps.pdf"), bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)
 
@@ -432,6 +465,7 @@ def main():
         fig_bars(plt, runs, out)
         fig_bar_one(plt, runs, out, "ctrl_per_veh_min", BARS[0][1], "fig_ctrl.pdf")
         fig_bar_one(plt, runs, out, "met_margin_es", BARS[1][1], "fig_margin.pdf")
+        fig_bars_extra(plt, runs, out)
     else:
         print(f"（{runs_csv} が無いので棒グラフ fig_bars.pdf は描きません）")
     fig_all(plt, hist, out, "conn_dur", "rep_cdf_dur_all.pdf")
