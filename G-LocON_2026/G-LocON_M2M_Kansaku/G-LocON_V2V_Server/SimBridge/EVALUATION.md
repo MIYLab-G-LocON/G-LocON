@@ -124,6 +124,7 @@ CDF は，値ごとの件数（度数分布）を小さい値から足し上げ�
 | `eval_6_main_path.bat` | 主の比較 60実行（生データつき）＋集計＋CDF の度数分布。本システムは τ=15秒と20秒を同じ走行の上で計算する（`--taus 15,20`）。数時間 | `results\eval_detail_path\main\`（report，report_cdf，raw） |
 | `eval_7_cdf_figs_path.bat` | 上の生データから論文・報告用の CDF の図と数値（τ=15秒・20秒それぞれ。`eval_cdf_figs.py --proposed`） | `results\eval_detail_path\main\report_cdf\figs_t15\`，`figs_t20\` |
 | `eval_8_params_path.bat` | τ・ρ・δ を1つずつ変える 5実行 | `results\eval_path\params\report\` |
+| `eval_9_main_path_10seeds.bat` | 論文の6条件（測位誤差5 m）の乱数を10回に増やす（`--seeds 1-10 --noises gps5slow`。乱数1〜5は済みなので6〜10の30実行）＋集計＋CDF＋論文の図。2〜3時間 | `results\eval_detail_path\main\`（誤差5 mは10回，誤差なしは5回のまま） |
 
 直線距離の結果のフォルダ（`results\eval\`，`results\eval_detail\`）とは別のフォルダに置くので，前の結果は消えない。
 

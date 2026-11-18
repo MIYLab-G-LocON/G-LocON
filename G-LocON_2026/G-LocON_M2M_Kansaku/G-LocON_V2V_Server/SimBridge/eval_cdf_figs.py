@@ -306,7 +306,7 @@ def bar_legends(axs, top, step):
 
 
 def fig_bars(plt, runs, out, noise="gps5slow"):
-    """論文の図: 制御メッセージ数（上）と判断余裕時間の確保率（下）を 1 枚に。全 6 条件，平均と標準偏差（乱数 5 回）.
+    """論文の図: 制御メッセージ数（上）と判断余裕時間の確保率（下）を 1 枚に。全 6 条件，平均と標準偏差（全乱数）.
     CDF の図と同じ大きさ（1 段の幅，2×2）にする。"""
     fig, axes = plt.subplots(2, 2, figsize=(W, H2))
     for i, (col, ylabel) in enumerate(BARS):

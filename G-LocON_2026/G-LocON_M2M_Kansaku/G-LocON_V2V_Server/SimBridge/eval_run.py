@@ -10,6 +10,8 @@
                                                # 生データ（1秒ごとの全車の位置・接続の記録など）も残す（60実行で約1GB）
     python eval_run.py --plan main --eta-by line
                                                # ETA を直線距離で計算する（2026/11/16 より前のアプリ。E14〜E16 の再現）
+    python eval_run.py --plan main --seeds 1-10 --noises gps5slow
+                                               # 乱数を 10 回に増やし，測位誤差 5 m だけ実行する（済んだ乱数 1〜5 は飛ばす）
 
 本システムの ETA の距離は，既定でルートの線に沿った道のり（--eta-by path。2026/11/16 からのアプリと同じ）。
 直線距離（--eta-by line）の結果と混ざらないよう，--root を指定しないときの置き場所を分ける:
@@ -57,12 +59,31 @@ PARAM_SETS = ["15:100:100",
               "15:100:30", "15:100:60", "15:100:150"]        # δ
 
 
-def plan_runs(plan, taus=None):
+def parse_seeds(text):
+    """"1-10" や "1,2,6-8" → [1, 2, ...]. 空なら SEEDS（既定 1〜5）."""
+    if not text:
+        return list(SEEDS)
+    out = []
+    for part in text.split(","):
+        part = part.strip()
+        if "-" in part:
+            a, b = part.split("-")
+            out += list(range(int(a), int(b) + 1))
+        elif part:
+            out.append(int(part))
+    return out
+
+
+def plan_runs(plan, taus=None, seeds=None, noises=None):
     """[{name, map, traffic, period, noise, seed, etas, radii}]
 
     taus: 本システムの τ を複数まとめて計算するとき（例 "15,20"）。ρ=δ=100m で，1回の SUMO の走行の上で同時に計算する
     （quick / main / noise のみ。params は τ・ρ・δ を1つずつ変える計画なので使わない）
+    seeds: 乱数の番号のリスト（既定 SEEDS = 1〜5）。main と params で使う（2026/11/18 追加）
+    noises: main で実行する測位誤差のリスト（既定 gps0 と gps5slow）。論文は gps5slow だけを使う（2026/11/18 追加）
     """
+    SEEDS = seeds or globals()["SEEDS"]
+    main_noises = noises or ["gps0", "gps5slow"]
     runs = []
     proposed = ",".join(f"{t}:100:100" for t in taus.split(",")) if taus else PROPOSED
 
@@ -76,7 +97,7 @@ def plan_runs(plan, taus=None):
     elif plan == "main":
         for m in MAPS:
             for traffic in ("low", "mid", "high"):
-                for noise in ("gps0", "gps5slow"):
+                for noise in main_noises:
                     for seed in SEEDS:
                         add(m, traffic, noise, seed)
     elif plan == "params":
@@ -162,6 +183,10 @@ def main():
     ap.add_argument("--root", default="", help="結果を置くフォルダ（既定 results/eval_path，--eta-by line なら results/eval）")
     ap.add_argument("--taus", default="",
                     help="本システムの τ を複数まとめて計算する（例 15,20。既定は 15 だけ）。ρ=δ=100m。同じ走行の上で計算するので時間はほぼ変わらない")
+    ap.add_argument("--seeds", default="",
+                    help="乱数の番号（例 1-10，1,3,5。既定 1-5）。済んだ分は飛ばすので，1-10 にすれば 6〜10 だけ実行する")
+    ap.add_argument("--noises", default="",
+                    help="main で実行する測位誤差（例 gps5slow。既定 gps0,gps5slow）。使える値: " + ", ".join(NOISE))
     ap.add_argument("--eta-by", choices=["path", "line"], default="path",
                     help="本システムの ETA の距離。path = ルートに沿った道のり（既定。今のアプリ），line = 直線距離（E14〜E16）")
     a = ap.parse_args()
@@ -172,7 +197,11 @@ def main():
         RESULT_ROOT = os.path.join(HERE, "results", "eval_path")
     print(f"ETA の距離: {'ルートに沿った道のり' if a.eta_by == 'path' else '直線距離'}（--eta-by {a.eta_by}），結果: {RESULT_ROOT}")
 
-    runs = [r for r in plan_runs(a.plan, a.taus or None) if a.only in r["name"]]
+    noises = [x.strip() for x in a.noises.split(",") if x.strip()] or None
+    for x in noises or []:
+        if x not in NOISE:
+            sys.exit(f"--noises の値 {x!r} は未定義です（使える値: {list(NOISE)}）")
+    runs = [r for r in plan_runs(a.plan, a.taus or None, parse_seeds(a.seeds), noises) if a.only in r["name"]]
     os.makedirs(os.path.join(RESULT_ROOT, a.plan, "logs"), exist_ok=True)
     todo = [r for r in runs if a.force or not os.path.exists(os.path.join(RESULT_ROOT, a.plan, r["name"] + ".csv"))]
     print(f"計画 {a.plan}: 全 {len(runs)} 実行，済み {len(runs) - len(todo)}，これから {len(todo)}")
